@@ -65,7 +65,7 @@ Outputs `cleaned_combined_qualtrics_lifepak_ttt_phase_1.csv`, `cleaned_lifepak_t
 
 #### `deid_ttt_phase_1.Rmd` (not yet on repo)
 
-Inputs cleaned ecological momentary assessment (EMA) data in `cleaned_lifepak_ttt_phase_1.csv` and cleaned pre-post data in `cleaned_qualtrics_ttt_phase_1.csv`
+Inputs cleaned LifePak data in `cleaned_lifepak_ttt_phase_1.csv` and cleaned Qualtrics data in `cleaned_qualtrics_ttt_phase_1.csv`
 
 Outputs deidentified data in `deid_cleaned_lifepak_ttt_phase_1.csv` and `deid_cleaned_qualtrics_ttt_phase_1.csv`
 
@@ -73,7 +73,7 @@ Outputs deidentified data in `deid_cleaned_lifepak_ttt_phase_1.csv` and `deid_cl
 
 ### Data
 
-Analyses input cleaned and deidentified EMA data in `deid_cleaned_lifepak_ttt_phase_1.csv`
+Analyses input cleaned and deidentified LifePak data in `deid_cleaned_lifepak_ttt_phase_1.csv`
 
 ### Code
 
@@ -86,7 +86,7 @@ TODO
 
 ### Data
 
-Analyses input cleaned (but not deidentified) EMA data in `cleaned_lifepak_ttt_phase_1.csv` and cleaned (but not deidentified) pre-post data in `cleaned_qualtrics_ttt_phase_1.csv`.
+Analyses input cleaned (but not deidentified) LifePak data in `cleaned_lifepak_ttt_phase_1.csv` and cleaned (but not deidentified) Qualtrics data in `cleaned_qualtrics_ttt_phase_1.csv`.
 - TODO: Consider updating `ttt_phase_1_main_analyses_08232023_final.Rmd` to input deidentified data in `deid_cleaned_lifepak_ttt_phase_1.csv` and `deid_cleaned_qualtrics_ttt_phase_1.csv`
 
 ### Code
