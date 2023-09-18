@@ -30,7 +30,9 @@ Qualtrics data were cleaned before LifePak data
 
 #### `ttt_phase1_qualtrics_cleaning.Rmd` or `ttt_phase1_qualtrics_cleaning_fix.Rmd` (not yet on repo)
 
-Inputs the following 12 raw CSV files (out of the 18 from Qualtrics)
+<details>
+<summary>Inputs the following 12 raw CSV files (out of the 18 from Qualtrics)</summary>
+<br>
 - `dp5_b_child_p1_numeric.csv`
 - `dp5_b_child_p1_choice_text.csv`
 - `dp5_b_child_remote_p1_numeric.csv`
@@ -43,6 +45,7 @@ Inputs the following 12 raw CSV files (out of the 18 from Qualtrics)
 - `dp5_3m_child_p1_choice_text.csv`
 - `dp5_3m_parent_p1_numeric.csv`
 - `dp5_3m_parent_p1_choice_text.csv`
+</details>
 
 Also inputs `dp5_p1_scoring.csv`
 - TODO: Where is `dp5_p1_scoring.csv` created? It's not in the `TRACK TO TREAT` folder above.
@@ -52,12 +55,16 @@ Outputs (though both are commented out) `yb_lsmh_ids_dates.csv` and `cleaned_qua
 
 #### `ttt_phase1_lifepak_cleaning.Rmd` (not yet on repo)
 
-Inputs the following 5 raw CSV files (out of the 10 from LifePak)
+<details>
+<summary>Inputs the following 5 raw CSV files (out of the 10 from LifePak)</summary>
+<br>
+- TODO
+- TODO
+- TODO
+- TODO
+- TODO
+</details>
 - TODO: What are the file names of the 5 CSV files of LifePak data retained via hard-coding in Line 109?
-- TODO
-- TODO
-- TODO
-- TODO
 
 Also inputs `cleaned_qualtrics_ttt_phase_1.csv`
 
