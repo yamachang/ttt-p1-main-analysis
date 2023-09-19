@@ -1,0 +1,749 @@
+---
+title: "ML-VAR Analyses"
+author:
+  - Sebastian Castro-Alvarez
+  - Laura F. Bringmann
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  bookdown::word_document2:
+    fig_caption: yes
+    number_sections: FALSE
+    reference_docx: APAtemplate.docx
+bibliography: references.bib
+csl: apa7.csl
+link-citations: true
+always_allow_html: true
+---
+  
+```{r setup, include=FALSE}
+library(knitr)
+library(kableExtra)
+library(bookdown)
+library(pander)
+knitr::opts_chunk$set(echo = TRUE, fig.height = 4, fig.width = 6, fig.pos = "!H",  
+                      warning=FALSE, message=FALSE)
+
+panderOptions('table.alignment.default', function(df)
+  ifelse(sapply(df, is.numeric), 'right', 'left'))
+panderOptions('table.split.table', Inf)
+panderOptions('big.mark', ",")
+panderOptions('keep.trailing.zeros', TRUE)
+
+# Use this code to render the document:
+# Render the document to a .docx file.
+# rmarkdown::render("Rmarkdown/ML-VAR_Analyses.Rmd") 
+```
+
+In this document, we analyze intensive longitudinal data of emotion dynamics. To analyze these data, we use the multilevel-vector autoregressive model (ML-VAR) and the vector autoregressive model (VAR). We also include all R code needed to run and replicate the analyses.
+
+To start, we first load into our R environment all the required R packages:
+
+```{r}
+packages <- rownames(installed.packages())
+if (!"psych" %in% packages) {install.packages("psych")}
+if (!"naniar" %in% packages) {install.packages("naniar")}
+if (!"lubridate" %in% packages) {install.packages("lubridate")}
+if (!"remotes" %in% packages) {install.packages("remotes")}
+if (!"esmpack" %in% packages) {
+  remotes::install_github("secastroal/esmpack")
+  }
+library(esmpack)
+library(foreign)
+library(MplusAutomation)
+
+invisible(lapply(list.files("../R/", full.names = TRUE), source))
+rm(packages)
+```
+
+## Data Preprocessing
+
+In this section, we read and clean the data to obtain the final sample that we use for the analyses. 
+
+```{r}
+mlvardata <- read.csv2("deid_cleaned_lifepak_ttt_phase_1.csv", 
+                       header = TRUE, sep = ",")
+mlvardata <- mlvardata[order(mlvardata$lifepak_id), ]
+```
+
+The data has 14 variables: ID, response number, beep time, response time, time difference (probably how long did it take the person to complete the questionnaire), beep completed (variable indicating that the person 'completed' the questionnaire on that beep), and scores on 8 emotions.
+
+Regarding the variables indicating the exact notification time and response time, we turn these variables into POSIXct, which is used to manage dates and times in R. 
+
+```{r}
+mlvardata$notification_time <- as.POSIXct(gsub("T", "", 
+                                               mlvardata$notification_time), 
+                                          tz = "GMT")
+mlvardata$response_time     <- as.POSIXct(gsub("T", "",
+                                               mlvardata$response_time),
+                                          tz = "GMT")
+```
+
+Turn response times into hours. Hours start counting for each individual on the first day that they have a valid observation. The hours correspond to the number of hours since the 00:00 hours of that first day. Therefore, if a person completed the first esm questionnaire at 9:30, the response time is 9.5. Also, if the completed another esm questionnaire the next day at 8:00, then the response time is 32.  
+
+```{r}
+tmp_time <- tapply(mlvardata$response_time, 
+                   mlvardata$lifepak_id, 
+                   FUN = function(x) {
+                     as.numeric(x) - as.numeric(min(x[which(!is.na(x))])) %/% 
+                       86400 * 86400
+                     }, 
+                   simplify = TRUE)
+
+mlvardata$response_time <- unlist(tmp_time)/3600
+```
+
+We also create another time variable indicator which indicates the number of planned beeps but with one additional step when going from one day to another. For example, if the plan was to assess individuals 5 times a day for six days, the indicator in `response_no` for the sixth beep of a person is 7 instead of 6. In other words, there is a jump of one unit for every five observations.  
+
+```{r}
+tmp_days <- tapply(mlvardata$notification_time, 
+                   mlvardata$lifepak_id,
+                   FUN = function (x) {
+                     as.numeric(as.Date(x)) - min(as.numeric(as.Date(x)))
+                   }) 
+mlvardata$response_no_night <- mlvardata$response_no + unlist(tmp_days)
+```
+
+We get a quick summary of the emotion scores as follows:
+
+```{r}
+summary(mlvardata[, 7:14])
+```
+
+This shows that the emotions were measured based on a visual analogue scale (VAS) from 0 to 100. For these analyses, we focus on the emotions *interest* and *sad*. Notice, that there are `r sum(mlvardata[, "interest"] < 0, na.rm = TRUE)` observations with negative scores on the variable *interest*. As this should not be the case, we further explore these observations.
+
+First, we create a subset of the data that only includes these observations and the variables *ID*, *interest*, and *sad*:
+
+```{r}
+mlvardata_minus0 <- mlvardata[mlvardata[, "interest"] < 0 & 
+                                !is.na(mlvardata[, "interest"]), 
+                              c("lifepak_id", "response_time", 
+                                "interest", "sad")]
+```
+
+The negative scores either -1 or -2 and come from `r nsub(mlvardata_minus0$lifepak_id)` subjects. The complete data of these subjects is stored in the following data.frame: 
+
+```{r}
+mlvardata_neg <- mlvardata[mlvardata$lifepak_id %in% 
+                             unique(mlvardata_minus0$lifepak_id), 
+                           c("lifepak_id", "response_time", 
+                             "interest", "sad")]
+```
+
+Moreover, the observed time series of these `r nsub(mlvardata_minus0$lifepak_id)` subjects are presented in the following Figure:
+
+```{r tsminus0, fig.cap = paste0("Time series of the variable 'interest' of the ", nsub(mlvardata_minus0$lifepak_id), " subjects with scores lower than 0.")}
+par(mfrow = c(2, 1), mar = c(4, 4, 1, 2) + 0.1)
+
+plot.ts(mlvardata_neg$interest[mlvardata_neg$lifepak_id == 
+                                 unique(mlvardata_minus0$lifepak_id)[1]],
+        ylab = "Interest", ylim = c(-5, 100),
+        xlab = "", xlim = c(0, 110), las = 1)
+mtext(paste0("ID = ", unique(mlvardata_minus0$lifepak_id)[1]), 3, at = 100)
+plot.ts(mlvardata_neg$interest[mlvardata_neg$lifepak_id ==
+                                 unique(mlvardata_minus0$lifepak_id)[2]],
+        ylab = "Interest", ylim = c(-5, 100),
+        xlab = "Beep", xlim = c(0, 110), las = 1)
+mtext(paste0("ID = ", unique(mlvardata_minus0$lifepak_id)[2]), 3, at = 100)
+
+```
+
+As the data from these subjects is not reliable, we decide to exclude them from the analyses. Thus, we create another data.frame without their data.
+
+```{r}
+mlvardata02 <- mlvardata[!(mlvardata$lifepak_id %in% 
+                             unique(mlvardata_minus0$lifepak_id)), ]
+```
+
+```{r, echo = FALSE}
+rm(mlvardata_minus0, mlvardata_neg)
+```
+
+We also want to exclude participants that do not have enough variation on their time series. For this, we first compute the mean and the standard deviation of each variable per person. The means are not necessary but it is still a good a descriptive to comprehend the data at hand. To compute these descriptive statistics, we use the following code:
+
+```{r}
+mean_interest <- tapply(mlvardata02$interest, mlvardata02$lifepak_id, mean, na.rm = TRUE) 
+mean_sad      <- tapply(mlvardata02$sad, mlvardata02$lifepak_id, mean, na.rm = TRUE) 
+
+sd_interest <- tapply(mlvardata02$interest, mlvardata02$lifepak_id, sd, na.rm = TRUE) 
+sd_sad      <- tapply(mlvardata02$sad, mlvardata02$lifepak_id, sd, na.rm = TRUE) 
+```
+
+We also plot the mean and the standard deviation of the two variables to visualize their relation.
+
+```{r meanscat, fig.cap = "Scatterplot of intraindividual means of 'interest' and 'sad'."}
+plot(mean_interest, mean_sad)
+```
+
+```{r sdscat, fig.cap = "Scatterplot of intraindividual sd of 'interest' and 'sad'."}
+plot(sd_interest, sd_sad)
+abline(h = 9.5, col = gray(0.5))
+abline(v = 9.5, col = gray(0.5))
+```
+
+As mentioned before, we exclude participants with not enough variation. The time series of an individual is considered to not have enough variation if the standard deviation of any of the variables is lower than 9.5. Therefore, to exclude these participants, we do:
+
+```{r}
+sd_lower <- ifelse(sd_interest < 9.5 | sd_sad < 9.5, TRUE, FALSE)
+sd_exclude <- as.numeric(names(which(sd_lower)))
+
+mlvardata02 <- mlvardata02[!(mlvardata02$lifepak_id %in% sd_exclude), ]
+ids <- unique(mlvardata02$lifepak_id)
+```
+
+As a result, we have excluded `r length(sd_exclude)` more participants, for a final sample of `r nsub(mlvardata02$lifepak_id)` participants to use in the following analyses.  
+
+```{r, echo = FALSE}
+rm(sd_lower, sd_exclude)
+```
+
+Now, we also create two subsets of the data. The first subset includes the whole remaining sample and we use the ML-VAR to analyze this data. In this case, we also exclude subjects with less than 5 observations. The second subset includes subjects that complied with at least 60 observations on both variables (*interest* and *sad*). We use the VAR model to analyze the data of each individual on this dataset.
+
+We create the first subset as follows:
+
+```{r}
+# Get compliance per subject for 'interest'
+comp_interest <- calc.nomiss(interest, lifepak_id, mlvardata02)
+
+# Get IDs of subjects with less than 5 responses
+id_exclude <- as.numeric(names(which(comp_interest < 5)))
+
+# Exclude subjects with less than 5 responses
+data_mlvar <- mlvardata02[!(mlvardata02$lifepak_id %in% id_exclude), ]
+```
+
+For the second subset, we first create a variable that indicates if the person has valid scores on both variables *interest* and *sad*, then, based on this new variable, we select the individuals with more than 60 observations. 
+
+```{r}
+# Create indicator variable of valid scores on 'interest' and 'sad'
+mlvardata02$ind_nomiss <- ifelse(is.na(mlvardata02$interest) &
+                                   is.na(mlvardata02$sad), NA, 1)
+
+# Get compliance on both variables per person
+comp_both <- calc.nomiss(ind_nomiss, lifepak_id, mlvardata02)
+
+# Get IDs of subjects with 60 or more responses on both variables
+id_include <- as.numeric(names(which(comp_both >= 60)))
+
+# Exclude subjects with less than 60 responses on both variables
+data_var <- mlvardata02[mlvardata02$lifepak_id %in% id_include, ]
+
+# Remove indicator variable in final subset
+data_var <- data_var[, 1:15]
+
+```
+
+```{r, echo = FALSE}
+rm(mlvardata, mlvardata02, comp_both, comp_interest, id_exclude, id_include)
+```
+
+## Sample's Descriptives
+
+After cleaning the data, we get that ML-VAR data includes responses from `r nsub(data_mlvar$lifepak_id)` participants. These participants replied between `r min(calc.nomiss(interest, lifepak_id, data_mlvar))` and `r max(calc.nomiss(interest, lifepak_id, data_mlvar))` beeps. In particular, the distribution of the compliance is presented in Figure \@ref(fig:compliance):
+
+```{r compliance, fig.cap = "Compliance on variable 'interest'"}
+hist(calc.nomiss(interest, lifepak_id, data_mlvar),
+     ylim = c(0, 8),
+     xlim = c(0, 120),
+     xlab = "Number of complied beeps",
+     las = 1,
+     breaks = 40,
+     main = "")
+
+```
+
+We can also see the distribution of the missing values on both variables in the following Figures:
+
+```{r heatmapinterest, fig.cap = "Missing values visualization of the variable 'interest'"}
+tmp <- reshape(na.omit(data_mlvar[, c(1, 2, 12)]), 
+               direction = "wide", 
+               idvar = "lifepak_id", 
+               timevar = "response_no")
+naniar::vis_miss(tmp[, -1], show_perc_col = FALSE)
+rm(tmp)
+```
+
+```{r heatmapsad, fig.cap = "Missing values visualization of the variable 'sad'"}
+tmp <- reshape(na.omit(data_mlvar[, c(1, 2, 14)]), 
+               direction = "wide", 
+               idvar = "lifepak_id", 
+               timevar = "response_no")
+naniar::vis_miss(tmp[, -1], show_perc_col = FALSE)
+rm(tmp)
+```
+
+Next, Figure @ref(fig:hist) presents the overall distribution of each variable of interest across the sample:
+
+```{r hist, fig.cap="Overall distribution of the variables 'interest' and 'sad'"}
+par(mfrow = c(1, 2))
+hist(data_mlvar$interest, 
+     main = "",
+     las = 1,
+     ylim = c(0, 1500),
+     xlab = "Interest",
+     breaks = 40)
+hist(data_mlvar$sad,
+     main = "",
+     las = 1,
+     ylim = c(0, 1500),
+     xlab = "Sad",
+     breaks = 40)
+```
+
+The distributions showed very high peaks at 0, 50 and 100. In particular the frequency of each of these responses can be checked as follows:
+
+```{r}
+sum(data_mlvar$sad == 0, na.rm = TRUE)
+sum(data_mlvar$sad == 50, na.rm = TRUE)
+sum(data_mlvar$sad == 100, na.rm = TRUE)
+
+sum(data_mlvar$interest == 0, na.rm = TRUE)
+sum(data_mlvar$interest == 50, na.rm = TRUE)
+sum(data_mlvar$interest == 100, na.rm = TRUE)
+```
+
+## Individuals' Descriptives
+
+For the VAR analyses, the sample got reduced to `r nsub(data_var$lifepak_id)` subjects. These individuals replied to at least 60 beeps on both variables of interest. Similarly as presented before, the distribution of the missing values is presented in Figures \@ref(fig:heatmapinterest2) and \@ref(fig:heatmapsad2).
+
+```{r heatmapinterest2, fig.cap = "Missing values visualization of the variable 'interest', VAR subset."}
+tmp <- reshape(na.omit(data_var[, c(1, 2, 12)]), 
+               direction = "wide", 
+               idvar = "lifepak_id", 
+               timevar = "response_no")
+naniar::vis_miss(tmp[, -1], show_perc_col = FALSE)
+rm(tmp)
+```
+
+```{r heatmapsad2, fig.cap = "Missing values visualization of the variable 'sad', VAR subset"}
+tmp <- reshape(na.omit(data_var[, c(1, 2, 14)]), 
+               direction = "wide", 
+               idvar = "lifepak_id", 
+               timevar = "response_no")
+naniar::vis_miss(tmp[, -1], show_perc_col = FALSE)
+rm(tmp)
+```
+
+To have a closer look at the individual time series, we plot the time series plot of each individual for the two variables and save it on a pdf file:
+
+```{r}
+ids <- unique(data_var$lifepak_id)
+pdf("TimeSeries.pdf")
+for (i in 1:length(ids)) {
+  plot.ts(data_var[data_var$lifepak_id == ids[i], c("interest", "sad")],
+          main = paste0("Subject ID = ", ids[i]), 
+          ylab = "Emotion Scores",
+          plot.type = "single", ylim = c(0, 100), 
+          col = gray(c(0.1, 0.5)), las = 1, lwd = 1.5)
+  mtext(paste0("Interest: Mean = ", 
+               round(mean(data_var[data_var$lifepak_id == ids[i], "interest"], 
+                          na.rm = TRUE), 2), ", sd = ", 
+               round(sd(data_var[data_var$lifepak_id == ids[i], "interest"], 
+                        na.rm = TRUE), 2)), 
+        side = 3, at = 1, line= 0.8, adj = 0, cex = 0.7)
+  mtext(paste0("Sad: Mean = ", 
+               round(mean(data_var[data_var$lifepak_id == ids[i], "sad"], 
+                          na.rm = TRUE), 2), ", sd = ", 
+               round(sd(data_var[data_var$lifepak_id == ids[i], "sad"], 
+                        na.rm = TRUE), 2)), 
+        side = 3, at = 1, adj = 0, cex = 0.7)
+  legend("bottomright", c("Interest", "Sad"), 
+         col = gray(c(0.1, 0.5)), lwd = 1.5, bg = "white")
+}
+rm(i)
+dev.off()
+```
+
+
+```{r, echo = FALSE, eval = FALSE}
+ids <- unique(data_var$lifepak_id)
+pdf("TimeSeries_time.pdf")
+for (i in 1:length(ids)) {
+  plot(data_var[data_var$lifepak_id == ids[i], "response_time"],
+       data_var[data_var$lifepak_id == ids[i], "interest"],
+       main = paste0("Subject ID = ", ids[i]), 
+       xlab = "Time",
+       ylab = "Emotion Scores", type = "l",
+       ylim = c(0, 100), 
+       col = gray(0.1), las = 1, lwd = 1.5)
+  lines(data_var[data_var$lifepak_id == ids[i], "response_time"],
+        data_var[data_var$lifepak_id == ids[i], "sad"],
+        col = gray(0.5), lwd = 1.5)
+  mtext(paste0("Interest: Mean = ", 
+               round(mean(data_var[data_var$lifepak_id == ids[i], "interest"], 
+                          na.rm = TRUE), 2), ", sd = ", 
+               round(sd(data_var[data_var$lifepak_id == ids[i], "interest"], 
+                        na.rm = TRUE), 2)), 
+        side = 3, at = 1, line= 0.8, adj = 0, cex = 0.7)
+  mtext(paste0("Sad: Mean = ", 
+               round(mean(data_var[data_var$lifepak_id == ids[i], "sad"], 
+                          na.rm = TRUE), 2), ", sd = ", 
+               round(sd(data_var[data_var$lifepak_id == ids[i], "sad"], 
+                        na.rm = TRUE), 2)), 
+        side = 3, at = 1, adj = 0, cex = 0.7)
+  legend("bottomright", c("Interest", "Sad"), 
+         col = gray(c(0.1, 0.5)), lwd = 1.5, bg = "white")
+}
+rm(i)
+dev.off()
+```
+
+Lastly, we look at the within person correlations between *interest* and *sad*. The correlations are computed as follows:
+
+```{r}
+correlations <- rep(NA, length(ids))
+
+for (i in 1:length(ids)) {
+  correlations[i] <- cor(data_var[data_var$lifepak_id == ids[i], "interest"],
+                         data_var[data_var$lifepak_id == ids[i], "sad"], 
+                         use = "complete.obs")
+}
+rm(i)
+```
+
+The correlations have the following distribution:
+
+```{r}
+hist(correlations, breaks = 15)
+rm(correlations)
+```
+
+## VAR Analyses per Person
+
+To run the VAR analyses per person in Mplus, we used the following for loop: 
+
+```{r, results = 'hide'}
+varfit <- list()
+
+if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
+
+setwd("Mplus/")
+
+for (i in 1:length(ids)) {
+  tmp <- data_var[data_var$lifepak_id == ids[i], 
+                  c("response_no_night", "interest", "sad")]
+  tmp <- na.omit(tmp)
+  names(tmp) <- c("time", "int", "sad")
+  
+  varfit[[i]] <- var2Mplus(y = c("int", "sad"), time = "time", data = tmp,
+                           filename = paste0("id", ids[i], ".dat"),
+                           runmodel = !file.exists(paste0("id", ids[i], ".out")))
+}
+rm(i, tmp)
+setwd("..")
+```
+
+This loop also uses a customized function that allows exporting the data to Mplus, writing the model's syntax, run the model in Mplus, and read the Mplus output into R. In this set of analyses, we also included time (represented in `response_no_night`) as a predictor to detrend the time series.
+
+Once the analyses were finished, we extracted the estimated parameters of interest (lagged and cross-lagged effects and linear trends) from the VAR analyses with the following code:
+
+```{r}
+parameters <- paste0("par", 1:9)
+results <- lapply(varfit, function(x) {
+  out <- cbind(parameters, 
+               x$parameters$unstandardized[c(1:7, 10:11), 
+                                           c(3, 6, 7)])
+  return(out)
+})
+
+results <- do.call(rbind, results)
+rm(parameters)
+```
+
+Next, we plot the estimated parameters with their 95\% credibility intervals per person.  
+
+
+```{r var1-par1, fig.cap = "Autoregressive effect of interest."}
+tmp <- results[results$parameters == "par1", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+
+```{r var1-par2, fig.cap = "Crossregressive effect of interest on sad."}
+tmp <- results[results$parameters == "par2", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r var1-par3, fig.cap = "Crossregressive effect of sad on interest."}
+tmp <- results[results$parameters == "par3", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r var1-par4, fig.cap = "Autoregressive effect of sad."}
+tmp <- results[results$parameters == "par4", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r var1-par5, fig.cap = "Linear trend of interest."}
+tmp <- results[results$parameters == "par5", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r var1-par6, fig.cap = "Linear trend of sad."}
+tmp <- results[results$parameters == "par6", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+We also ran the VAR analyses using a feature of DSEM that tries to approximate unequal spaced longitudinal observations to equal spaced by adding missing values. This is achieved by using the **TINTERVAL** option in Mplus. While this approach has been suggested to deliver similar results as continuous time models, finding the correct time interval can be difficult in empirical applications given the frequency of the beeps and whether the beeps prompted randomly throughout the day. Here, we used a **TINTERVAL** of 2.5 hours, which should result in adding three missing observations during the night. Note that some risks of using this feature is that multiple values might be on the same interval if the interval is not small enough. This is addressed automatically in Mplus, but if it happens too many times, Mplus warns that the approximation is not accurate.
+
+```{r, results = 'hide'}
+varfit <- list()
+
+if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
+
+setwd("Mplus/")
+
+for (i in 1:length(ids)) {
+  tmp <- data_var[data_var$lifepak_id == ids[i], 
+                  c("response_time", "interest", "sad")]
+  tmp <- na.omit(tmp)
+  names(tmp) <- c("time", "int", "sad")
+  
+  varfit[[i]] <- var2Mplus(y = c("int", "sad"), data = tmp,
+                           variable_options = list(timevar = "time", tinterval = 2.5),
+                           analysis_options = list(biterations.min = 10000,
+                                                   chains = 3),
+                           filename = paste0("id", ids[i], "tinterval.dat"),
+                           runmodel = !file.exists(paste0("id", ids[i],
+                                                          "tinterval.out"))
+                           #runmodel = TRUE
+                           )
+}
+rm(i, tmp)
+setwd("..")
+```
+
+Here, we also extract the estimated parameters of interest with the following code: 
+
+```{r }
+parameters <- paste0("par", c(1:2, 4:5, 7:9))
+results <- lapply(varfit, function(x) {
+  out <- cbind(parameters, 
+               x$parameters$unstandardized[c(1:5, 8, 9), 
+                                           c(3, 6, 7)])
+  return(out)
+})
+
+results <- do.call(rbind, results)
+rm(parameters)
+```
+
+The estimated parameters and their credibility intervals are shown in the following figures:
+
+```{r var2-par1, fig.cap = "Autoregressive effect of interest."}
+tmp <- results[results$parameters == "par1", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r var2-par2, fig.cap = "Cross-regressive effect of intereston sad."}
+tmp <- results[results$parameters == "par2", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+
+```{r var2-par3, fig.cap = "Autoregressive effect of sad."}
+tmp <- results[results$parameters == "par4", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+
+```{r var2-par4, fig.cap = "Cross-regressive effect of sad on interest."}
+tmp <- results[results$parameters == "par5", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r, eval = FALSE, echo = FALSE}
+for (i in 1:length(ids)) {
+  tmp <- data_var[data_var$lifepak_id == ids[i], 
+                  c("response_time", "interest", "sad")]
+  tmp <- na.omit(tmp)
+  names(tmp) <- c("time", "int", "sad") 
+  
+  tmp$id <- 1
+  
+  
+  print(ids[i])
+  esmpack::expand.esm(tmp, id = "id", time = "time", tinterval = 6)
+}
+rm(tmp)
+```
+
+<!-- The following ids have two observations within the same time interval: 56591, 206517, 478498, 510530, 715428, 793985, and 816917. -->
+
+```{r, results = 'hide', eval = FALSE}
+varfit <- list()
+
+if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
+
+setwd("Mplus/")
+
+for (i in 1:length(ids)) {
+  tmp <- data_var[data_var$lifepak_id == ids[i], 
+                  c("response_time", "interest", "sad")]
+  tmp <- na.omit(tmp)
+  names(tmp) <- c("time", "int", "sad") 
+  
+  tmp$id <- 1
+  
+  esmpack::expand.esm(tmp, id = "id", time = "time", tinterval = 3)
+  
+  
+  varfit[[i]] <- var2Mplus(y = c("int", "sad"), data = tmp,
+                           variable_options = list(timevar = "beep", tinterval = 1),
+                           filename = paste0("id", ids[i], "tinterval.dat"),
+                           runmodel = !file.exists(paste0("id", ids[i],
+                                                          "tinterval.out"))
+                           )
+}
+rm(i, tmp)
+setwd("..")
+```
+
+
+```{r, eval = FALSE}
+results <- lapply(varfit, function(x) {
+  out <- cbind(paste0("par", c(1:2, 4:5, 7:9)), 
+               x$parameters$unstandardized[c(1:5, 8, 9), 
+                                           c(3, 6, 7)])
+  return(out)
+})
+
+results <- do.call(rbind, results)
+```
+
+
+```{r, eval = FALSE}
+tmp <- results[results$`paste0("par", c(1:2, 4:5, 7:9))` == "par1", ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(-1, 1))
+segments(x0 = 1:53, 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+
+<!-- Fit lm with trend (check kpss) and if it is significant plot time series of those individuals -->
+
+<!-- check if there is enough variance... what is considered enough variance? sd of minimum 10% of the scale... meaning minimum sd must be 10. -->
+
+<!-- In ML VAR try with and without sd lower than 10 on both, in VAr only without sd lower than 10. -->
+
+<!-- Do the analysis with time trend. Maybe with the actual time (depending how hard it is to turn that into reasonable numbers) otherwise with beep number. -->
+
+<!-- Start running the analysis... how similar are the coefficients of VAR and ML-VAR? get centrality measures of the coefficients. -->
+
+
+```{r, eval = FALSE}
+tmp <- data_var[data_var$lifepak_id == ids[25], ]
+difftime(tail(tmp$notification_time, -1), head(tmp$notification_time, -1))
+difftime(tail(tmp$response_time, -1), head(tmp$response_time, -1))
+```
+
+<!-- Compare results with time trend and tinterval... explain, with tinterval no independent variable can be added at the within level. otherwise extract standardized residuals from lm(sad ~ time) and redo the analyses.check residuals of the var model with serial.test. -->
+
+<!-- check the correlations between tinterval and trend results. Scatterplots with color codding for significant pairs three colors. -->
+
+## Multilevel VAR analysis
+
+```{r, results = 'hide'}
+if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
+
+setwd("Mplus/")
+
+tmp <- data_mlvar[, c("lifepak_id", "response_no_night", "interest", "sad")]
+tmp <- na.omit(tmp)
+names(tmp) <- c("id", "time", "int", "sad")
+
+mlvarfit <- mlvar2Mplus(y = c("int", "sad"), id = "id", time = "time", data= tmp,
+                        random.effects = list(lagged = TRUE, slopes = FALSE,
+                                              trend = TRUE, rvar = FALSE),
+                        filename = "mlvar_trend.dat",
+                        runmodel = !file.exists("mlvar_trend.out"))
+
+rm(tmp)
+setwd("..")
+```
+
+
+```{r, results = 'hide'}
+if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
+
+setwd("Mplus/")
+
+tmp <- data_mlvar[, c("lifepak_id", "response_no_night", "interest", "sad")]
+tmp <- na.omit(tmp)
+names(tmp) <- c("id", "time", "int", "sad")
+
+mlvarfit <- mlvar2Mplus(y = c("int", "sad"), id = "id", data= tmp,
+                        random.effects = list(lagged = TRUE, slopes = FALSE,
+                                              trend = TRUE, rvar = FALSE),
+                        variable_options = list(timevar = "time", tinterval = 2.5),
+                        analysis_options = list(biterations.min = 10000,
+                                                chains = 3),
+                        filename = "mlvar_tinterval.dat",
+                        runmodel = !file.exists("mlvar_tinterval.out"))
+
+rm(tmp)
+setwd("..")
+```
