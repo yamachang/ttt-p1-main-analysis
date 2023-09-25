@@ -45,10 +45,10 @@ Inputs the following 12 raw CSV files (out of the 18 from Qualtrics)
 - `dp5_3m_parent_p1_choice_text.csv`
 
 Also inputs `dp5_p1_scoring.csv`
-- TODO: Where is `dp5_p1_scoring.csv` created? It's not in the `TRACK TO TREAT` folder above.
+- TODO: Where is `dp5_p1_scoring.csv` created? It's not in the `TRACK TO TREAT` folder above (or elsewhere on `jslab` shared drive). Asked Isaac on 9/25/23.
 
 Outputs (though both are commented out) `yb_lsmh_ids_dates.csv` and `cleaned_qualtrics_ttt_phase_1.csv`. Moreover, `ttt_phase1_qualtrics_cleaning.Rmd` outputs `cleaned_qualtrics_ttt_phase_1_fixed_220604.csv`, whereas `ttt_phase1_qualtrics_cleaning_fix.Rmd` (which has various hard-coded changes) outputs `cleaned_qualtrics_ttt_phase_1_fixed_220606.csv`.
-- TODO: Is `cleaned_qualtrics_ttt_phase_1_fixed_220604.csv` or `cleaned_qualtrics_ttt_phase_1_fixed_220606.csv` ever used later? Seems later scripts just input `cleaned_qualtrics_ttt_phase_1.csv`. Should the later scripts be updated?
+- TODO: Is `cleaned_qualtrics_ttt_phase_1_fixed_220604.csv` or `cleaned_qualtrics_ttt_phase_1_fixed_220606.csv` ever used later? Seems later scripts just input `cleaned_qualtrics_ttt_phase_1.csv`. Should the later scripts be updated? Asked Isaac on 9/25/23.
 
 #### `ttt_phase1_lifepak_cleaning.Rmd` (not yet on repo)
 
