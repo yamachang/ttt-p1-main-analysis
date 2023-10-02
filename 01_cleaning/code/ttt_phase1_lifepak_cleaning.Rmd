@@ -1,0 +1,788 @@
+---
+title: "Untitled"
+author: "Michael Mullarkey"
+date: "9/28/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, cache = FALSE}
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE, include = FALSE)
+```
+
+```{r loading packages}
+
+if(!require(tidymodels)){install.packages('tidymodels')}
+library(tidymodels)
+if(!require(tidyverse)){install.packages('tidyverse')}
+library(tidyverse)
+if(!require(skimr)){install.packages('skimr')}
+library(skimr)
+if(!require(furrr)){install.packages('furrr')}
+library(furrr)
+if(!require(scales)){install.packages('scales')}
+library(scales)
+if(!require(tictoc)){install.packages('tictoc')}
+library(tictoc)
+if(!require(heatmaply)){install.packages('heatmaply')}
+library(heatmaply)
+if(!require(doMC)){install.packages('doMC')}
+library(doMC)
+if(!require(glue)){install.packages('glue')}
+library(glue)
+if(!require(janitor)){install.packages('janitor')}
+library(janitor)
+if(!require(future)){install.packages('future')}
+library(future)
+if(!require(remotes)){install.packages('remotes')}
+library(remotes)
+if(!require(psych)){install.packages('psych')}
+library(psych)
+if(!require(imputeTS)){install.packages('imputeTS')}
+library(imputeTS)
+if(!require(timetk)){install.packages('timetk')}
+library(timetk)
+if(!require(tsibble)){install.packages('tsibble')}
+library(tsibble)
+if(!require(feasts)){install.packages('feasts')}
+library(feasts)
+if(!require(dtw)){install.packages('dtw')}
+library(dtw)
+if(!require(parallelDist)){install.packages('parallelDist')}
+library(parallelDist)
+if(!require(pheatmap)){install.packages('pheatmap')}
+library(pheatmap)
+if(!require(diffdf)){install.packages('diffdf')}
+library(diffdf)
+if(!require(tableone)){install.packages('tableone')}
+library(tableone)
+if(!require(tableone)){install.packages('tableone')}
+library(tableone)
+if(!require(corrr)){install.packages('corrr')}
+library(corrr)
+if(!require(Amelia)){install.packages('Amelia')}
+library(Amelia)
+if(!require(MOTE)){install.packages('MOTE')}
+library(MOTE)
+if(!require(fuzzyjoin)){install.packages('fuzzyjoin')}
+library(fuzzyjoin)
+if(!require(car)){install.packages('car')}
+library(car)
+if(!require(lsmeans)){install.packages('lsmeans')}
+library(lsmeans)
+if(!require(fastDummies)){install.packages('fastDummies')}
+library(fastDummies)
+if(!require(lubridate)){install.packages('lubridate')}
+library(lubridate)
+if(!require(modeltime)){install.packages('modeltime')}
+library(modeltime)
+if(!require(tibbletime)){install.packages('tibbletime')}
+library(tibbletime)
+
+
+```
+
+```{r parallelize}
+## Let's set our number of cores for this document (May differ across computers)
+
+registerDoMC(cores = 7)
+
+## Benign change to see if Git is working
+
+```
+
+General plan here:
+
+LifePak data
+
+1. Get a sense of the original data format
+2. Do initial cleaning (ordering notifications within participant, creating time of response)
+
+```{r reading in all likepak files}
+
+# Creating a file list of all csvs in working directory 
+
+files <- list.files(pattern = "*.csv")
+
+# Creating a file list of only Qualtrics files
+
+lifepak_files <- files[c(1:5)]
+
+# Importing in data without variable names (Have to skip the first few rows because of Qualtrics' format)
+
+all_likepak <- lifepak_files %>% 
+  map(~read_csv(.x, skip = 1, col_names = FALSE))
+
+# Creating variable names from those same files
+
+all_lifepak_names <- lifepak_files %>%
+  map(read_csv) %>% 
+  map(~slice_head(.x)) %>% 
+  map(~names(.x)) %>% 
+  map(~make_clean_names(.x))
+
+# Adding the names to the imported data
+
+named_lifepak <- map2(all_likepak, all_lifepak_names, ~{
+  
+  names(.x) <- .y  
+  .x
+  
+})
+
+```
+
+```{r doing visual inspection of lifepak data}
+
+map(1:5, ~{
+  enframe(named_lifepak[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  skim()
+})
+
+```
+
+```{r identifying where the variable names do not match across dataframes}
+
+# All variables AREN"T in the same order across the dataframes AND for some reason the names were also changed.
+
+enframe(named_lifepak[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  names() %>% 
+  enframe() %>% 
+  separate(value, into = c("first", "rest"), "_") %>% 
+  select(first) %>% 
+  deframe()
+
+var_name_first <- map(1:5, ~(
+  enframe(named_lifepak[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  names() %>% 
+  enframe() %>% 
+  separate(value, into = c("first", "rest"), "_") %>% 
+  select(first) %>% 
+  deframe()
+  ))
+
+```
+
+```{r maybe time to rename the instruct and intro variables that mess up the alphabetical order fix for the columns being jumbled}
+
+enframe(named_lifepak[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(contains("instruct"))
+
+enframe(named_lifepak[2]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(contains("intro"))
+
+```
+
+
+```{r try putting names in alphabetical order since many start with the same prefixes}
+
+enframe(named_lifepak[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  select(-contains("instruct"),-contains("intro")) %>% 
+  select(order(colnames(.)))
+
+alpha_order <- map(1:5, ~{
+  enframe(named_lifepak[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  select(-contains("instruct"),-contains("intro")) %>% 
+  select(order(colnames(.)))
+})
+
+## Now are they in the same order?
+
+alpha_name_first <- map(1:5, ~(
+  enframe(alpha_order[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  names() %>% 
+  enframe() %>% 
+  separate(value, into = c("first", "rest"), "_") %>% 
+  select(first) %>% 
+  deframe()
+  )) %>% 
+  print()
+
+```
+
+```{r seeing if these variables are actually ordered the same across data frames}
+
+first <- 1:5
+second <- 1:5
+
+# Solved the duplicates problem using this solution https://stackoverflow.com/questions/29170099/remove-duplicate-column-pairs-sort-rows-based-on-2-columns
+
+comp_df <- expand_grid(first, second) %>% 
+  filter(first != second) %>% 
+  rowwise() %>%
+  mutate(key = paste(sort(c(first, second)), collapse="")) %>%
+  distinct(key, .keep_all = TRUE) %>%
+  select(-key) %>% 
+  print()
+
+discrep_names <- map2(comp_df$first, comp_df$second, ~{
+  alpha_name_first[[.x]] == alpha_name_first[[.y]]
+}) %>% 
+  print()
+
+# A vector of which values are true, showing matches across dataframes. Bottom line, we have several different patterns of missingness here so lots of regular methods won't work
+# map(1:10, ~{
+#   which(discrep_names[[.x]])
+# })
+
+```
+
+```{r verifying number of participants}
+
+map(1:5, ~(
+  enframe(alpha_order[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by(participant_id) %>% 
+  tally()
+)) %>% 
+  bind_rows()
+
+# Verifying one participant who had 3 different IDs due to download errors (See README file on Lab Server)
+
+map(1:5, ~(
+  enframe(alpha_order[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by(participant_id) %>% 
+  tally()
+)) %>% 
+  bind_rows() %>% 
+  filter(participant_id == "21441-034516")
+
+map(1:5, ~(
+  enframe(alpha_order[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by(participant_id) %>% 
+  tally()
+)) %>% 
+  bind_rows() %>% 
+  filter(participant_id == "21476-878753")
+
+```
+```{r creating dataframe with all participants and columns}
+
+all_df <- map(c(1:5), ~(
+  enframe(alpha_order[.x]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  select(-contains("gps")) %>% 
+  mutate(across(contains("responded"), as.character),
+         # across(ends_with("day"), as.numeric),
+         # across(ends_with("night"), as.numeric))
+  )
+)
+) %>% 
+  bind_rows() %>% 
+  select(!where(is.logical)) %>% # Dropping logical columns since none of them are valid (All the 347 variables that weren't ever relevant)
+  print()
+
+
+```
+```{r reordering notifications in chronological order and other initial cleaning}
+
+## This is going through this for one test dataframe, we'll want a function that will let us map through all the dataframes in our list
+
+temp <- all_df %>% 
+  group_by(participant_id) %>% 
+  mutate(response_time = case_when(
+    responded != "User didn't respond to this notification" ~ notification_time + session_instance_response_lapse + session_length,
+    TRUE ~ NA_POSIXct_
+      )
+    ) %>% 
+  arrange(notification_time, .by_group = TRUE) %>% 
+  mutate(response_no = row_number(),
+         time_diff = as.numeric(response_time - lag(notification_time)), # This is in hours but I just need to make sure there aren't any negatives
+         ) %>% 
+  ungroup() %>% 
+  relocate(participant_id, response_no, notification_no, notification_time, response_time, time_diff) %>% 
+  print()
+
+## Want to check that response time for first notification isn't later than the next notification (This is hack-y right now, but a positive number indicates no out of order responses)
+
+temp %>% 
+  filter(!is.na(time_diff)) %>% 
+  count(time_diff) %>% 
+  arrange(time_diff) %>% 
+  slice_head()
+
+```
+
+```{r figuring out which variables need to be combined}
+
+skim(temp)
+
+```
+
+```{r trying to pivot these columns longer}
+
+# Let's see if we can do it for one kind of variable first
+
+# This might be incomplete since it doesn't know what number this should go up to (106 or 107) but at least gets us most of the way there
+# Maybe we can use the DataEditR package to add rows to groups if needed like I saw Asmae reference?
+
+temp %>% 
+  select(participant_id, response_no, contains("sad")) %>%
+  pivot_longer(cols = contains("sad"),
+               names_to = c(".value", "timing", "type"),
+               names_sep = "_") %>% 
+  mutate(type = case_when(
+    is.na(type) ~ "orig",
+    TRUE ~ type
+  )) %>% 
+  filter(!is.na(sad)) %>% 
+  complete(participant_id, nesting(response_no)) # Try to figure out how to do this minimally so we can left_join a bunch of versions of this together programatically after mapping through a bunch of different variables. This version will work for the 2 underscore variables, will need to have another for the 3 underscore variables
+  
+
+## Write function for two underscore variables
+
+tidy_two_underscore <- function(.data, contains_text){
+  
+    .data %>% 
+      select(participant_id, response_no, contains(contains_text)) %>%
+      pivot_longer(cols = contains(contains_text),
+               names_to = c(".value", "timing", "type"),
+               names_sep = "_") %>% 
+      mutate(type = case_when(
+            is.na(type) ~ "orig",
+            TRUE ~ type
+          )) %>% 
+      filter_at(vars(starts_with(contains_text)), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+    select(-timing,-type)# Was having trouble getting filter to work with curly curly operator so used this hack https://stackoverflow.com/questions/54350264/dplyr-unquoting-does-not-work-with-filter-function
+}
+
+temp %>% 
+  tidy_two_underscore(contains_text = "sad")
+
+```
+Fuck, this won't work when there are a different number of underscores across certain variables!! Wow this dataset is actually kind of impossible to clean.
+
+Next step is to figure out where this procedure works vs. where it doesn't. I think this will work for variables that have 1-2 underscores but not 2-3 underscores across the various variables that need to be tidied
+
+New note: The procedure seems to work on 2-3 underscore variables that don't have multiple variables with the same starting characters. For example, aware doesn't work this way because it has three versions where "aware" comes first (aware_mood, aware_felt_worse, aware_felt_better)
+
+```{r}
+
+## Extracting all two underscore variables
+
+two_under <- temp %>% 
+  names() %>% 
+  enframe() %>% 
+  filter(str_count(value, "_") == 2) %>% 
+  select(value) %>% # Up to here is getting the 2 underscore variables only
+  separate(value, into = c("first", "rest"), "_") %>% 
+  distinct(first) %>% # Now getting the identifying part of each string, the first part before the first underscore
+  filter(first != "time" & first != "aware" & first != "reminder" & first != "easy" & first != "notice") %>% # Not taking care of the timing variables here
+  deframe() %>% 
+  print()
+
+## Mapping over those variables to create tidy versions of those variables
+
+tidy_cols <- map(two_under, ~{
+  temp %>% 
+    tidy_two_underscore(contains_text = .x)
+}) %>% 
+  print()
+
+```
+
+Ok, what do I still have to figure out how to tidy?
+- All the variables that start with "reminder" (3 versions orig/v2/347, two types day/night, five variables 1/2/3/4/5)
+- All the variables that start with "aware" (2 versions, orig/v2, one type, three variables felt_better/felt_worse/mood)
+- easy_use variables (2 versions, orig/v2, one type, one variable)
+- five_times_per_day variables (2 versions, orig/v2, one type, one variable)
+- notice_change variables (2 versions, orig/v2, one type, one variable)
+- time_complete variables (2 versions, orig/v2, one type, one variable)
+
+Probably need three separate solutions. One for reminder variables, one for aware variables, and one for remaining variables
+
+```{r}
+
+temp %>% 
+  select(-contains("bad"), -contains("best"),-contains("control"), -contains("energy"),-contains("focus"),-contains("fun"),-contains("interest"),-contains("movement"),
+         -contains("other"),-contains("sad"),-contains("thankyou"),-contains("worst")) %>% 
+  skim()
+
+```
+
+For reminder variables, try some kind of regular expression where we combine variables that have "reminder_ANYTHING_1_ANYTHINGORNOTHING" for 1-5
+
+```{r}
+
+# Test outside function once
+
+num <- 1
+
+temp %>% 
+  select(participant_id, response_no, matches(glue("reminder_.*_{num}+$")), matches(glue("reminder_.*_{num}_.*$"))) %>%
+  pivot_longer(cols = c(matches(glue("reminder_.*_{num}+$")), matches(glue("reminder_.*_{num}_.*$"))),
+               names_to = c(".value", "timing", "number", "type"),
+               names_sep = "_") %>% 
+  mutate(type = case_when(
+    is.na(type) ~ "orig",
+    TRUE ~ type
+  )) %>% 
+  filter_at(vars(starts_with("reminder")), any_vars(!is.na(.))) %>% 
+  complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+  rename("reminder_{num}" := reminder) %>% 
+  select(-number)
+
+## Create tidy function
+
+tidy_reminder_vars <- function(.data, num){
+  .data %>% 
+  select(participant_id, response_no, matches(glue("reminder_.*_{num}+$")), matches(glue("reminder_.*_{num}_.*$"))) %>%
+  pivot_longer(cols = c(matches(glue("reminder_.*_{num}+$")), matches(glue("reminder_.*_{num}_.*$"))),
+               names_to = c(".value", "timing", "number", "type"),
+               names_sep = "_") %>% 
+  mutate(type = case_when(
+    is.na(type) ~ "orig",
+    TRUE ~ type
+  )) %>% 
+  filter_at(vars(starts_with("reminder")), any_vars(!is.na(.))) %>% 
+  complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+  rename("reminder_{num}" := reminder) %>% 
+  select(-number,-timing,-type)
+}
+
+## Map over tidy function
+
+tidy_reminder_cols <- map(1:5, ~{
+  temp %>% 
+    tidy_reminder_vars(num = .x)
+})  %>% 
+  reduce(left_join, by = c("participant_id","response_no")) %>% 
+  print()
+
+
+
+```
+
+Tidy aware_felt_better
+
+```{r}
+
+tidied_aware_better <- temp %>% 
+      select(participant_id, response_no, contains("aware_felt_better")) %>%
+      pivot_longer(cols = contains("aware_felt_better"),
+               names_to = c(".value", "timing", "type"),
+               names_sep = "_") %>% 
+      mutate(type = case_when(
+            is.na(type) ~ "orig",
+            TRUE ~ type
+          )) %>% 
+      filter_at(vars(starts_with("aware")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing,-type) %>% 
+      rename(aware_felt_better = aware) %>% 
+      print() 
+
+```
+
+
+Tidy aware_felt_worse
+
+```{r}
+
+tidied_aware_worse <- temp %>% 
+      select(participant_id, response_no, contains("aware_felt_worse")) %>%
+      pivot_longer(cols = contains("aware_felt_worse"),
+               names_to = c(".value", "timing", "type"),
+               names_sep = "_") %>% 
+      mutate(type = case_when(
+            is.na(type) ~ "orig",
+            TRUE ~ type
+          )) %>% 
+      filter_at(vars(starts_with("aware")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing,-type) %>% 
+      rename(aware_felt_worse = aware) %>% 
+      print() 
+
+```
+
+Tidy aware_mood
+
+```{r}
+
+tidied_aware_mood <- temp %>% 
+      select(participant_id, response_no, contains("aware_mood")) %>%
+      pivot_longer(cols = contains("aware_mood"),
+               names_to = c(".value", "timing", "type"),
+               names_sep = "_") %>% 
+      mutate(type = case_when(
+            is.na(type) ~ "orig",
+            TRUE ~ type
+          )) %>% 
+      filter_at(vars(starts_with("aware")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing,-type) %>% 
+      rename(aware_mood = aware) %>% 
+      print() 
+
+```
+
+Tidy easy_use
+
+```{r}
+
+tidied_easy_use <- temp %>% 
+      select(participant_id, response_no, contains("easy_use")) %>%
+      pivot_longer(cols = contains("easy_use"),
+               names_to = c(".value", "timing", "type"),
+               names_sep = "_") %>% 
+      mutate(type = case_when(
+            is.na(type) ~ "orig",
+            TRUE ~ type
+          )) %>% 
+      filter_at(vars(starts_with("easy")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing,-type) %>% 
+     rename(easy_use = easy) %>% 
+      print() 
+
+```
+
+Tidy five_times_per_day
+
+```{r}
+
+tidied_five <- temp %>% 
+      select(participant_id, response_no, contains("five_times_per_day")) %>%
+      pivot_longer(cols = contains("five_times_per_day"),
+               names_to = c(".value", "timing", "type", "day"),
+               names_sep = "_") %>% 
+      mutate(type = case_when(
+            is.na(type) ~ "orig",
+            TRUE ~ type
+          )) %>% 
+      filter_at(vars(starts_with("five")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing,-type,-day) %>% 
+      rename(five_times_per_day = five) %>% 
+      print() 
+
+```
+
+Tidy notice_change
+
+```{r}
+
+tidied_notice_change <- temp %>% 
+      select(participant_id, response_no, contains("notice_change")) %>%
+      pivot_longer(cols = contains("notice_change"),
+               names_to = c(".value", "timing"),
+               names_sep = "_") %>% 
+      filter_at(vars(starts_with("notice")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing) %>% 
+      rename(notice_change = notice) %>% 
+      print() 
+
+```
+
+Tidy time_complete
+
+```{r}
+
+tidied_time_complete <- temp %>% 
+      select(participant_id, response_no, contains("time_complete")) %>%
+      pivot_longer(cols = contains("time_complete"),
+               names_to = c(".value", "timing"),
+               names_sep = "_") %>% 
+      filter_at(vars(starts_with("time")), any_vars(!is.na(.))) %>%
+      complete(participant_id, response_no = full_seq(response_no, period = 1)) %>% 
+      select(-timing) %>% 
+      rename(time_complete = time) %>% 
+      print() 
+
+```
+
+Next steps: 
+- Create reduced data frame of columns that didn't need tidying
+- Join all the tidied columns to that data frame
+- Be done!
+
+Create reduced data frame with columns that didn't need tidying
+
+```{r}
+
+temp %>% 
+  select(-contains("bad"), -contains("best"),-contains("control"), -contains("energy"),-contains("focus"),-contains("fun"),-contains("interest"),-contains("movement"),
+         -contains("other"),-contains("sad"),-contains("thankyou"),-contains("worst"), -contains("reminder"), -contains("aware"),-contains("easy_use"),
+         -contains("five_times_a_day"), -contains("five_times_per_day"), -contains("notice_change"), -contains("time_complete")) %>% 
+  skim()
+
+reduced_df <- temp %>% 
+  select(-contains("bad"), -contains("best"),-contains("control"), -contains("energy"),-contains("focus"),-contains("fun"),-contains("interest"),-contains("movement"),
+         -contains("other"),-contains("sad"),-contains("thankyou"),-contains("worst"), -contains("reminder"), -contains("aware"),-contains("easy_use"),
+         -contains("five_times_a_day"), -contains("five_times_per_day"), -contains("notice_change"), -contains("time_complete")) %>% 
+  print()
+
+```
+
+Join all tidied columns to this data frame by participant_id and response_no
+
+```{r}
+
+# First need to join all of tidied columns that are in a list together using reduce
+
+tidy_cols_df <- tidy_cols %>% 
+  reduce(left_join, by = c("participant_id", "response_no")) %>% 
+  select(-contains("experience"))
+
+# Joining all tidied columns with original data frame
+
+reduced_df %>% 
+  left_join(tidy_cols_df, by = c("participant_id", "response_no")) %>% 
+  left_join(tidy_reminder_cols, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_aware_better, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_aware_worse, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_aware_mood, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_easy_use, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_five, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_notice_change, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_time_complete, by = c("participant_id", "response_no")) %>% 
+  skim()
+
+tidy_lifepak_p1 <- reduced_df %>% 
+  left_join(tidy_cols_df, by = c("participant_id", "response_no")) %>% 
+  left_join(tidy_reminder_cols, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_aware_better, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_aware_worse, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_aware_mood, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_easy_use, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_five, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_notice_change, by = c("participant_id", "response_no")) %>% 
+  left_join(tidied_time_complete, by = c("participant_id", "response_no")) %>% 
+  mutate(lifepak_id = str_extract(participant_id, "-.*"),
+         lifepak_id = str_remove(lifepak_id, "-")) %>% 
+  relocate(participant_id, lifepak_id, everything()) %>% 
+  print()
+
+```
+
+```{r read in qualtrics data}
+
+wide_qualtrics <- read_csv("cleaned_qualtrics_ttt_phase_1.csv")
+
+wide_qualtrics %>% 
+  select(contains("id"))
+
+```
+```{r}
+
+id_qualtrics <- wide_qualtrics %>% 
+  select(yb_life_pak_id) %>% 
+  arrange(yb_life_pak_id) %>% 
+  print()
+
+id_lifepak <- tidy_lifepak_p1 %>% 
+  select(lifepak_id) %>% 
+  distinct(lifepak_id) %>% 
+  arrange(lifepak_id) %>% 
+#  filter(lifepak_id != "034516" & lifepak_id != "092521") %>% 
+  print()
+
+!id_qualtrics$yb_life_pak_id %in% id_lifepak$lifepak_id
+
+id_qualtrics[c(34,61,103:106),]
+
+!id_lifepak$lifepak_id %in%id_qualtrics$yb_life_pak_id
+
+id_lifepak[c(6, 12, 17, 27, 34, 36, 56, 67, 97, 106),]
+
+# Going through IDs
+
+# Function
+
+filter_id <- function(.data, id) {
+  .data %>% 
+  select(yb_lsmh_id, yb_life_pak_id) %>% 
+  filter(yb_lsmh_id == id)
+}
+
+lost_ids <- c("LSMH00097", "LSMH00306", "LSMH00457", "LSMH00617", "LSMH00681", "LSMH00483", "LSMH00416")
+
+qualtrics_missing <- map_dfr(lost_ids, ~{
+  wide_qualtrics %>% 
+    filter_id(id = .x)
+}) %>% 
+  print()
+
+# Trying to figure out if any of these potentially incorrect IDs are matching up with anything in the Lifepak data
+
+qualtrics_missing %>% 
+  filter(!is.na(yb_life_pak_id)) %>% 
+  filter(yb_life_pak_id %in% id_lifepak$lifepak_id)
+
+# Confirming no other ids have NA for lifepak id within the Qualtrics data
+
+wide_qualtrics %>% 
+  filter(is.na(yb_life_pak_id)) %>% 
+  select(yb_lsmh_id)
+
+
+```
+```{r correcting ids in qualtrics}
+
+id_corrected_qualtrics <- wide_qualtrics %>% 
+  filter(yb_lsmh_id != "LSMH00062") %>% 
+  mutate(yb_life_pak_id = case_when(
+    yb_lsmh_id == "LSMH00097" ~ "092521",
+    yb_lsmh_id == "LSMH00306" ~ "130294",
+    yb_lsmh_id == "LSMH00457" ~ "292656",
+    yb_lsmh_id == "LSMH00617" ~ "479327",
+    yb_lsmh_id == "LSMH00681" ~ "510530",
+    yb_lsmh_id == "LSMH00483" ~ "558692",
+    yb_lsmh_id == "LSMH00416" ~ "946021",
+    TRUE ~ yb_life_pak_id
+  ))
+
+```
+
+```{r correcting ids in lifepak}
+
+id_corrected_lifepak <- tidy_lifepak_p1 %>% 
+  filter(lifepak_id != "234803" & lifepak_id != "878753" & lifepak_id != "297469")
+```
+
+
+```{r join qualtrics and lifepak data}
+
+all_ttt_data <- left_join(id_corrected_lifepak, id_corrected_qualtrics, by = c("lifepak_id" = "yb_life_pak_id"))
+
+write_csv(all_ttt_data, "cleaned_combined_qualtrics_lifepak_ttt_phase_1.csv")
+
+```
+
+```{r writing lifepak data}
+
+write_csv(id_corrected_lifepak, "cleaned_lifepak_ttt_phase_1.csv")
+
+```
+
+```{r}
+
+write_csv(id_corrected_qualtrics, "cleaned_qualtrics_ttt_phase_1.csv")
+
+```
+

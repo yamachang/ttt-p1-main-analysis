@@ -1,0 +1,1442 @@
+---
+title: "Cleaning and Joining"
+author: "Michael Mullarkey"
+date: "6/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, cache = FALSE}
+# setwd("S:\\TRACK to TREAT\\Data\\Qualtrics Data\\Raw Data")
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE, include = FALSE)
+```
+
+```{r loading packages}
+
+if(!require(tidymodels)){install.packages('tidymodels')}
+library(tidymodels)
+if(!require(tidyverse)){install.packages('tidyverse')}
+library(tidyverse)
+if(!require(skimr)){install.packages('skimr')}
+library(skimr)
+if(!require(furrr)){install.packages('furrr')}
+library(furrr)
+if(!require(scales)){install.packages('scales')}
+library(scales)
+if(!require(tictoc)){install.packages('tictoc')}
+library(tictoc)
+if(!require(heatmaply)){install.packages('heatmaply')}
+library(heatmaply)
+if(!require(doMC)){install.packages('doMC')}
+library(doMC)
+if(!require(glue)){install.packages('glue')}
+library(glue)
+if(!require(janitor)){install.packages('janitor')}
+library(janitor)
+if(!require(future)){install.packages('future')}
+library(future)
+if(!require(remotes)){install.packages('remotes')}
+library(remotes)
+if(!require(psych)){install.packages('psych')}
+library(psych)
+if(!require(imputeTS)){install.packages('imputeTS')}
+library(imputeTS)
+if(!require(timetk)){install.packages('timetk')}
+library(timetk)
+if(!require(tsibble)){install.packages('tsibble')}
+library(tsibble)
+if(!require(feasts)){install.packages('feasts')}
+library(feasts)
+if(!require(dtw)){install.packages('dtw')}
+library(dtw)
+if(!require(parallelDist)){install.packages('parallelDist')}
+library(parallelDist)
+if(!require(pheatmap)){install.packages('pheatmap')}
+library(pheatmap)
+if(!require(diffdf)){install.packages('diffdf')}
+library(diffdf)
+if(!require(tableone)){install.packages('tableone')}
+library(tableone)
+if(!require(tableone)){install.packages('tableone')}
+library(tableone)
+if(!require(corrr)){install.packages('corrr')}
+library(corrr)
+if(!require(Amelia)){install.packages('Amelia')}
+library(Amelia)
+if(!require(MOTE)){install.packages('MOTE')}
+library(MOTE)
+if(!require(fuzzyjoin)){install.packages('fuzzyjoin')}
+library(fuzzyjoin)
+if(!require(car)){install.packages('car')}
+library(car)
+if(!require(lsmeans)){install.packages('lsmeans')}
+library(lsmeans)
+if(!require(fastDummies)){install.packages('fastDummies')}
+library(fastDummies)
+
+
+```
+
+```{r parallelize}
+## Let's set our number of cores for this document (May differ across computers)
+
+registerDoMC(cores = 7)
+
+## Benign change to see if Git is working
+
+```
+
+General plan here:
+
+Qualtrics data
+
+1. DONE! Need to read in all choice text and numeric data, then validate that they have the same order of columns/number of rows (Probably need to write this as a function/test)
+2. DONE! Need to remove duplicates from all baseline and follow-up data frames separately (Probably need to write this as a function/test combo as well)
+3. DONE! Remove all survey previews, tests of the survey, etc. that weren't removed before data collection began across all surveys
+4. DONE! Have coordinators cross-reference data to make sure we're not missing anyone's gift cards (or data on this end)
+5. DONE! Need to integrate choice text with numeric data across all Qualtrics submmissions (Probably involves writing a function/test at this point)
+6. DONE! Need to add combine remote and in-person administrations (Can't just add rows since variables changed, will need to add those columns first)
+7. DONE! Then we need to join the baseline and follow-up data (One bazillion percent need to write a test here)
+8. DONE! Then need to integrate columns together based on shared ID (Child with parent
+9. DONE! Create one-hot encoded versions of factor variables with commas in them (Test time!)
+10.DONE! Create composites of numeric variables (Absolutely testing this too)
+
+LikePak data
+
+TBD
+
+```{r reading in all qualtrics files}
+
+# Creating a file list of all csvs in working directory 
+
+files <- list.files(pattern = "*.csv")
+
+# Creating a file list of only Qualtrics files
+
+# qualtrics_files <- files[-c(1:5,18:21)]
+qualtrics_files <- c(
+  "dp5_b_child_p1_numeric.csv",
+  "dp5_b_child_p1_choice_text.csv",
+  "dp5_b_child_remote_p1_numeric.csv",
+  "dp5_b_child_remote_p1_choice_text.csv",
+  "dp5_b_parent_p1_numeric.csv",
+  "dp5_b_parent_p1_choice_text.csv",
+  "dp5_b_parent_remote_p1_numeric.csv",
+  "dp5_b_parent_remote_p1_choice_text.csv",
+  "dp5_3m_child_p1_numeric.csv",
+  "dp5_3m_child_p1_choice_text.csv",
+  "dp5_3m_parent_p1_numeric.csv",
+  "dp5_3m_parent_p1_choice_text.csv"
+)
+
+# Importing in data without variable names (Have to skip the first few rows because of Qualtrics' format)
+
+all_qualtrics <- qualtrics_files %>% 
+  map(~read_csv(.x, skip = 3, col_names = FALSE))
+
+# Creating variable names from those same files
+
+all_qualtrics_names <- qualtrics_files %>%
+  map(read_csv) %>% 
+  map(~slice_head(.x)) %>% 
+  map(~names(.x)) %>% 
+  map(~make_clean_names(.x))
+
+# Adding the names to the imported data
+
+named_qualtrics <- map2(all_qualtrics, all_qualtrics_names, ~{
+  
+  names(.x) <- .y  
+  .x
+  
+})
+
+```
+
+```{r}
+
+named_qualtrics
+
+```
+
+
+Some resources for testing in R: <br>
+<br>
+https://journal.r-project.org/archive/2011-1/RJournal_2011-1_Wickham.pdf
+https://testthat.r-lib.org/reference/index.html
+
+```{r test for comparing columns across choice text and numeric versions of the same dataframe}
+
+# Creating a named list in order to make the later comparisons across specific data frames possible
+
+names(named_qualtrics) <- qualtrics_files
+
+named_qualtrics["dp5_3m_child_p1_choice_text.csv"] 
+
+# Creating data frame to match data frames that should have the same variable names Resource: https://community.rstudio.com/t/is-there-a-way-to-move-every-other-row-in-a-column-into-a-new-column-in-r/61625
+
+df_test <- enframe(qualtrics_files) %>% 
+  mutate(variable = rep(c("text", "numeric"), (nrow(cur_data()) / 2)), 
+           key = rep(1:(nrow(cur_data()) / 2), each = 2)) %>%
+    pivot_wider(id_cols = key, names_from = variable, values_from = value) %>% 
+    select(-key)
+
+# Testing to see if there are any columns in one dataframe that aren't in the other (In all cases, both columns were present in both dataframes)
+
+map2(df_test$text, df_test$numeric, ~{
+  
+  df1 <- named_qualtrics[.x] 
+  df2 <- named_qualtrics[.y]
+  
+  compare_df_cols(df1, df2) %>% 
+  mutate(nas = rowSums(is.na(.))) %>% 
+  group_by(nas) %>% 
+  tally()
+  }
+  )
+
+```
+
+```{r test comparing number of rows across choice text and numeric versions of the same data frame}
+
+## Test comparing number of rows across matched data frames
+
+map2(df_test$text, df_test$numeric, ~{
+  
+  df1 <- as.data.frame(named_qualtrics[.x]) 
+  df2 <- as.data.frame(named_qualtrics[.y])
+  
+  df1_rows <- df1 %>% 
+  tally()
+  
+  df2_rows <- df2 %>% 
+  tally()
+  
+  df1_rows == df2_rows
+  }
+  )
+
+```
+
+```{r creating functions for finding duplicates across all data frames}
+
+## Looking for duplicates of ID
+
+enframe(named_qualtrics[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by(y3m_lsmh_id) %>% 
+  tally() %>% 
+  filter(n >= 2) %>% 
+  arrange(desc(n))
+
+## Creating a function to do this for all datasets
+
+find_dupes <- function(.data, id){
+  
+  enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by({{id}}) %>% 
+  tally() %>% 
+  filter(n >= 2) %>% 
+  arrange(desc(n))
+  
+}
+
+named_qualtrics[1] %>% 
+  find_dupes(id = y3m_lsmh_id)
+
+## Looking at duplicates of ID without NAs and summing how many rows are taken up by the duplicates
+
+dupe_na_rows <- enframe(named_qualtrics[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by(y3m_lsmh_id) %>% 
+  tally() %>% 
+  filter(n >= 2) %>% 
+  arrange(desc(n)) %>% 
+  mutate(invalid = n - 1,
+    total_dupe_rows = cumsum(invalid)) %>% 
+  slice_tail() %>% 
+  dplyr::select(total_dupe_rows) %>% 
+  deframe() %>% 
+  print()
+
+count_dupe_rows <- function(.data, id){
+  
+  dupe_na_rows <- enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by({{id}}) %>% 
+  tally() %>% 
+  filter(n >= 2) %>% 
+  arrange(desc(n)) %>% 
+  mutate(invalid = n - 1,
+    total_dupe_rows = cumsum(invalid)) %>% 
+  slice_tail() %>% 
+  dplyr::select(total_dupe_rows) %>% 
+  deframe()
+  
+}
+
+named_qualtrics[1] %>% 
+  count_dupe_rows(id = y3m_lsmh_id)
+
+## Calculating how many rows would exist if there were no duplicate IDs and with duplicate IDs
+
+rows_no_dupes <- enframe(named_qualtrics[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  distinct(y3m_lsmh_id) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+find_total_rows <- function(.data){
+  
+  enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  tally() %>% 
+  deframe()
+  
+}
+
+named_qualtrics[1] %>% 
+  find_total_rows()
+
+find_final_rows <- function(.data, id){
+  
+  enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(-contains("sitb_"),-contains("ppd")) %>%
+  mutate(progress_calc = rowSums(!is.na(.))) %>% 
+  group_by({{id}}) %>%
+  slice(which.max(progress_calc)) %>% 
+  ungroup() %>% 
+  tally() %>% 
+  deframe()
+  
+}
+
+named_qualtrics[1] %>% 
+  find_final_rows(id = y3m_lsmh_id)
+
+
+```
+
+```{r looking closer into youth 3 month follow up duplicates}
+
+## Getting the ids of people with duplicate surveys
+
+dupe_ids_y3m <- enframe(named_qualtrics[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  group_by(y3m_lsmh_id) %>% 
+  tally() %>% 
+  filter(n >= 2) %>% 
+  arrange(desc(n)) %>% 
+  filter(!is.na(y3m_lsmh_id)) %>% 
+  dplyr::select(y3m_lsmh_id) %>% 
+  deframe()
+
+# What does someone completing the survey 7 times look like?
+
+enframe(named_qualtrics[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  filter(is.na(y3m_lsmh_id))
+
+# If I distinct we go down to 97 (Not saying this is correct, we need to decide which of the two to keep)
+
+enframe(named_qualtrics[1]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  distinct(y3m_lsmh_id, .keep_all = TRUE) %>% 
+  filter(!is.na(y3m_lsmh_id))
+
+```
+
+```{r finding duplicates by id across all data frames and testing planned removal function}
+
+## Getting names of id variables across all data frames
+
+id_list <- map(named_qualtrics, ~{
+  
+  .x %>% 
+    dplyr::select(ends_with("id"),-response_id,-contains("life_pak")) %>% 
+    names() %>% 
+    deframe()
+  
+}) %>% 
+  print()
+
+## Checking for duplicates across all data frames
+
+map2(c(1:12), id_list, ~{
+  
+  named_qualtrics[.x] %>% 
+    find_dupes(id = .data[[.y]])
+  
+})
+
+## Calculating duplicate rows across all data frames
+
+all_dupe_rows <- map2(c(1:12), id_list, ~{
+  
+  named_qualtrics[.x] %>% 
+    count_dupe_rows(id = .data[[.y]])
+  
+})
+
+## Calculating expected number of rows and testing whether we're accounting for duplicates effectively
+
+all_total_rows <- map(c(1:12), ~{
+  
+  named_qualtrics[.x] %>% 
+    find_total_rows()
+  
+})
+
+all_final_rows <-  map2(c(1:12), id_list, ~{
+  
+  named_qualtrics[.x] %>% 
+    find_final_rows(id = .data[[.y]])
+  
+})
+
+test_dupe_removal <- pmap(list(x = all_dupe_rows, y = all_total_rows, z = all_final_rows), function(x, y, z){
+  
+    guesed_total <- y - x
+    z == guesed_total
+  
+})
+
+```
+
+```{r writing function to remove duplicates from all data frames and implementing it}
+
+remove_dupes <- function(.data, id){
+  
+  progress_df <- enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  # dplyr::select(-contains("sitb_"),-contains("ppd")) %>% 
+  mutate(progress_calc = rowSums(!is.na(.))) %>% 
+  group_by({{id}}) %>%
+  slice(which.max(progress_calc)) %>%
+  ungroup()
+  
+}
+
+named_qualtrics[1] %>% 
+  remove_dupes(id = y3m_lsmh_id)
+
+no_dupe_qualtrics <- map2(c(1:12), id_list, ~{
+  
+  named_qualtrics[.x] %>% 
+    remove_dupes(id = .data[[.y]])
+  
+})
+
+```
+
+```{r writing function to remove survey previews or test sessions}
+
+remove_tests <- function(.data, id){
+  
+  enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  filter(str_detect(distribution_channel, "preview") == F) %>% 
+  filter({{id}} != "LSMH00000" & {{id}} != "LSMH00000000111" & {{id}} != "LSMH00001" & {{id}} != "LSMH00062") %>% 
+  filter()
+  
+}
+
+no_dupe_qualtrics[1] %>% 
+  remove_tests(id = y3m_lsmh_id)
+
+no_tests_qualtrics <- map2(c(1:12), id_list, ~{
+  
+  no_dupe_qualtrics[.x] %>% 
+    remove_tests(id = .data[[.y]])
+  
+})
+
+```
+
+```{r creating lsmh ids and start times for coordinators to cross reference}
+
+# in_person_base <- enframe(no_tests_qualtrics[5]) %>% 
+#   dplyr::select(value) %>% 
+#   unnest(value) %>% 
+#   dplyr::select(start_date, end_date, yb_lsmh_id) %>% 
+#   mutate(in_person = "Yes")
+# 
+# remote_base <- enframe(no_tests_qualtrics[7]) %>% 
+#   dplyr::select(value) %>% 
+#   unnest(value) %>% 
+#   dplyr::select(start_date, end_date, yb_lsmh_id) %>% 
+#   mutate(in_person = "No")
+# 
+# all_youth_base <- in_person_base %>% 
+#   bind_rows(remote_base) %>% 
+#   relocate(yb_lsmh_id, start_date, end_date, in_person) %>% 
+#   arrange(start_date) %>% 
+#   print()
+# 
+# all_youth_base %>% 
+#   filter(str_detect(yb_lsmh_id, "LSMH00190")) %>% 
+#   arrange(start_date)
+# 
+# write_csv(all_youth_base, "yb_lsmh_ids_dates.csv")
+# 
+# all_youth_base %>% 
+#   count(in_person)
+
+```
+
+```{r looking at a specific id for coordinators}
+
+# enframe(no_dupe_qualtrics[7]) %>% 
+#    dplyr::select(value) %>% 
+#    unnest(value) %>% 
+#   filter(str_detect(yb_lsmh_id, "LSMH00190")) %>% 
+#   dplyr::select(yb_lsmh_id, start_date, end_date, progress, progress_calc)
+
+```
+
+
+```{r looking at names of files for reference to one at a time variable identification in a below chunk}
+
+qualtrics_files[c(1,3,5,7,9,11)]
+
+```
+
+```{r looking at which sessions have less than complete progress according to Qualtrics for coordinators}
+
+map(no_tests_qualtrics, ~{
+  
+  .x %>% 
+    filter(progress < 100)
+  
+})
+
+```
+
+
+Lots of documentation needed here, and unfortunately a lot of it has to be done by hand and cross-referencing with the original Qualtrics Surveys. <br>
+
+*3 Month Follow-Up Youth Survey* 
+Factor variables: y3m_chrome_browser, y3m_sitbi_1a, y3m_sitbi_2a, y3m_sitbi_2b, y3m_sitbi_3a, y3m_sitbi_4a 
+
+Variables That Need to Be Renamed for Clarity: N/A
+
+*3 Month Follow-Up Parent Survey*
+Factor variables: p3m_childsex, p3m_childgender, p3m_childethnicity, p3m_grade, p3m_school, p3m_childmeds_1, p3m_childtx_1, p3m_childtx_2, p3m_childtx_3, p3m_childtx_4, p3m_accommodations,
+p3m_accommodations_2, p3m_income, p3m_caretaker, p3m_caretaker_living, p3m_single_parent, p3m_caregiver1_2, p3m_caregiver1_3, p3m_caregiver1_4, p3m_caregiver1_5, p3m_caregiver1_6, p3m_caregiver1_7, p3m_caregiver2_2, p3m_caregiver2_3, p3m_caregiver2_4, p3m_caregiver2_5, p3m_caregiver2_6, p3m_caregiver2_7, p3m_parenttx_1, p3m_parenttx_2, p3m_parenttx_3, p3m_ppd_1, p3m_covid_spread, p3m_covid_effect, p3m_covid_sick, p3m_covid_symptoms, p3m_covid_test, p3m_covid_test_result, p3m_covid_support, p3m_teletherapy1, p3m_teletherapy2, p3m_online_tx1, p3m_online_tx2
+
+Variables That Need to Be Renamed for Clarity: p3m_caregiver1_1:p3m_caregiver2_8
+
+*Baseline Youth In-Person Survey*
+Factor variables: yb_sitbi_1a, yb_sitbi_2a, yb_sitbi_2b, yb_sitbi_3a, yb_sitbi_4a, yb_pds_1, yb_pds_10, yb_ppd_1
+
+Variables That need to Be Renamed for Clarity: N/A
+
+*Baseline Youth Remote Survey*
+Factor variables: yb_sitbi_1a, yb_sitbi_2a, yb_sitbi_2b, yb_sitbi_3a, yb_sitbi_4a, yb_pds_1, yb_pds_10, yb_ppd_1, yb_interview
+
+Variables That need to Be Renamed for Clarity: N/A
+
+*Baseline Parent In-Person Survey*
+Factor variables: pb_childsex, pb_childgender, pb_childethnicity, pb_birthorder, pb_grade, pb_school, pb_childmeds_1, pb_childtx_1, pb_childtx_2, pb_childtx_3, pb_childtx_4, pb_accommodations, pb_income, pb_caretaker, pb_caretaker_living, pb_single_parent, pb_caregiver1_2, pb_caregiver1_3, pb_caregiver1_4, pb_caregiver1_5, pb_caregiver1_6, pb_caregiver1_7, pb_caregiver2_2, pb_caregiver2_3, pb_caregiver2_4, pb_caregiver2_5, pb_caregiver_6, pb_caregiver2_7, pb_atts, pb_parenttx_1, pb_parenttx_2, pb_parenttx_3, pb_ppd_1 
+
+Variables That need to Be Renamed for Clarity: N/A
+
+*Baseline Parent Remote Survey*
+Factor variables: pb_childsex, pb_childgender, pb_childethnicity, pb_birthorder, pb_grade, pb_school, pb_childmeds_1, pb_childtx_1, pb_childtx_2, pb_childtx_3, pb_childtx_4, pb_accommodations, pb_income, pb_caretaker, pb_caretaker_living, pb_single_parent, pb_caregiver1_2, pb_caregiver1_3, pb_caregiver1_4, pb_caregiver1_5, pb_caregiver1_6, pb_caregiver1_7, pb_caregiver2_2, pb_caregiver2_3, pb_caregiver2_4, pb_caregiver2_5, pb_caregiver_6, pb_caregiver2_7, pb_atts, pb_parenttx_1, pb_parenttx_2, pb_parenttx_3, pb_ppd_1 
+
+Variables That need to Be Renamed for Clarity: N/A
+
+
+```{r}
+
+# Glimpse is a useful function, but its outputs when you put it inside map look terrible, so mapping through every other data frame and looking at variable names to cross-reference with Qualtrics surveys to identify variables that should be factors
+
+map(c(1,3,5,7,9,11), ~{
+  
+  df_glimpse <- enframe(no_tests_qualtrics[.x]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(-contains("tim"))
+
+  names(df_glimpse)
+  
+})
+
+```
+
+```{r integreating numeric data with choice text data}
+
+## My idea is to create a vector of columns that contain numeric data in the numeric data frame, use that vector to drop those columns from the choice text data. 
+
+## Then I can use that vector to select down to only columns containing numeric data within the numeric dataframe and bind those numeric columns to the choice text data. That way we get the best versions of both (Don't have the comma problem in the multi-response options, or at least it can be solved more easily, get more information on variables that are factors without having to hard code them, and at the same time don't have to do a bunch of hard coding numbers either). 
+
+## Since we're doing this before removing duplicates etc. we need to do this separately for baseline and follow-up, though that will ultimately save us time since we don't have do the other cleaning steps twice across baseline and follow up other than removing duplicates.
+
+## Can't just use is.numeric though, since that will count a bunch of variables that should be factors. So let's find the variables that are factors first so we can exclude them from the variables that get coded as numeric
+
+## Do this once
+
+# Creating vector of factor variables
+
+y3m_factor <- enframe(no_tests_qualtrics[2]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(y3m_chrome_browser, y3m_sitbi_1a, y3m_sitbi_2a, y3m_sitbi_2b, y3m_sitbi_3a, y3m_sitbi_4a) %>% # Need the function to have these variables as input
+  names()
+
+# Creating vector of numeric variables in baseline
+
+y3m_numeric <- enframe(no_tests_qualtrics[2]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(-all_of(y3m_factor)) %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  names()
+
+# Selecting down to only numeric variables in baseline numeric dataframe
+
+y3m_num_only <- enframe(no_tests_qualtrics[2]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(-all_of(y3m_factor)) %>% 
+  dplyr::select(where(is.numeric))
+
+glimpse(y3m_num_only)
+
+## Taking choice text baseline, dropping all the numeric variables from choice text dataframe, binding to the numeric columns from the numeric data, and converting all the variables we've designated as factors to foctors in the resulting dataframe
+
+y3m_all <- enframe(no_tests_qualtrics[1]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>%  
+  dplyr::select(-all_of(y3m_numeric)) %>% 
+  bind_cols(y3m_num_only) %>% 
+  mutate(across(all_of(y3m_factor), as.factor)) # Also converting all variables that are factors to factors from character values here
+
+glimpse(y3m_all)
+
+```
+```{r writing functions to integrate numeric and choice text for all datasets}
+
+## A function for getting the factor variable names 
+
+# Don't need this first function now for the integrated function but leaving it in for reproducibility of this section
+
+get_fac_names <- function(.data, factor_vars){
+
+  .data <- enframe(.data) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>%
+  unnest(value) %>%
+  dplyr::select(any_of(factor_vars)) %>% # Need the function to have these variables as input
+  names()
+
+}
+
+fac_vec <- no_tests_qualtrics[2] %>%
+  get_fac_names(factor_vars = c("y3m_chrome_browser", "y3m_sitbi_1a", "y3m_sitbi_2a", "y3m_sitbi_2b", "y3m_sitbi_3a", "y3m_sitbi_4a"))
+
+## A function for getting the numeric variable names
+
+get_num_names <- function(.data, factor_vars){
+  
+  .data <- enframe(.data) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  ungroup() %>% 
+  dplyr::select(-any_of({{factor_vars}})) %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  names()
+  
+}
+
+num_vec <- no_tests_qualtrics[2] %>% 
+  get_num_names(factor_vars = fac_vec)
+
+## A function that selects down to the numeric variables
+
+create_num_df <- function(.data, factor_vars){
+  
+  .data <- enframe(.data) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  ungroup() %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  dplyr::select(-any_of({{factor_vars}}))
+  
+}
+
+num_df_test <- no_tests_qualtrics[2] %>% 
+  create_num_df(factor_vars = fac_vec)
+
+create_all_df <- function(.data, num_vars, num_df, factor_vars){
+  
+  .data <- enframe(.data) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+  dplyr::select(value) %>% 
+  unnest(value) %>%  
+  ungroup() %>% 
+  dplyr::select(-any_of({{num_vars}})) %>% 
+  bind_cols(num_df) %>% 
+  mutate(across(any_of({{factor_vars}}), as.factor)) # Also converting all variables that are factors to factors from character values here
+  
+}
+
+all_df_test <- no_tests_qualtrics[1] %>% 
+  create_all_df(num_vars = num_vec, num_df = num_df_test,factor_vars = fac_vec) %>% 
+  print()
+
+
+```
+
+```{r integrating these functions into larger function to integrate all choice text and numeric data}
+
+# This function will need numeric data frame, choice text data frame, and a vector of factor variables
+
+integrate_dfs <- function(.data, choice_df_map, factor_vars_map){
+  
+  num_vec <- .data %>% 
+  get_num_names(factor_vars = factor_vars_map)
+  
+  num_df_test <- .data %>% 
+  create_num_df(factor_vars = factor_vars_map)
+  
+  .data <- choice_df_map %>% 
+  create_all_df(num_vars = num_vec, num_df = num_df_test, factor_vars = factor_vars_map) 
+  
+}
+
+test_integrated <- no_tests_qualtrics[2] %>% 
+  integrate_dfs(choice_df_map = no_tests_qualtrics[1], factor_vars_map = c("y3m_chrome_browser", "y3m_sitbi_1a", "y3m_sitbi_2a", "y3m_sitbi_2b", "y3m_sitbi_3a", "y3m_sitbi_4a")) %>% 
+  print()
+
+```
+
+```{r mapping through all data frames to integrate choice text and numeric data frames}
+
+# install.packages("datapasta")
+library(datapasta)
+
+# Naming the list so we can map through
+
+# names(no_tests_qualtrics) <- NULL
+
+# Now creating a list of factor variables to map through as well, use the datapasta package to convert these to quoted vectors line by line with the Toggle Vector Quotes RStudio Add-In rather than having to quote every single variable from the above markdown document by hand
+
+fac_vars_list <- list(c("y3m_chrome_browser", "y3m_sitbi_1a", "y3m_sitbi_2a", "y3m_sitbi_2b", "y3m_sitbi_3a", "y3m_sitbi_4a"),
+                      c("p3m_childsex","p3m_childgender","p3m_childethnicity","p3m_grade","p3m_school","p3m_childmeds_1","p3m_childtx_1","p3m_childtx_2","p3m_childtx_3","p3m_childtx_4","p3m_accommodations", "p3m_accommodations_2","p3m_income","p3m_caretaker","p3m_caretaker_living","p3m_single_parent","p3m_caregiver1_2","p3m_caregiver1_3","p3m_caregiver1_4","p3m_caregiver1_5", "p3m_caregiver1_6","p3m_caregiver1_7","p3m_caregiver2_2","p3m_caregiver2_3","p3m_caregiver2_4","p3m_caregiver2_5","p3m_caregiver2_6","p3m_caregiver2_7","p3m_parenttx_1","p3m_parenttx_2", "p3m_parenttx_3","p3m_ppd_1","p3m_covid_spread","p3m_covid_effect","p3m_covid_sick","p3m_covid_symptoms","p3m_covid_test","p3_covid_test_result","p3m_covid_support","p3m_teletherapy1", "p3m_teletherapy2","p3m_online_tx1","p3m_online_tx2"),
+                      c("yb_sitbi_1a","yb_sitbi_2a","yb_sitbi_2b","yb_sitbi_3a","yb_sitbi_4a","yb_pds_1","yb_pds_10","yb_ppd_1"),
+                      c("yb_sitbi_1a","yb_sitbi_2a","yb_sitbi_2b","yb_sitbi_3a","yb_sitbi_4a","yb_pds_1","yb_pds_10","yb_ppd_1","yb_interview"),
+                      c("pb_childsex","pb_childgender","pb_childethnicity","pb_birthorder","pb_grade","pb_school","pb_childmeds_1","pb_childtx_1","pb_childtx_2","pb_childtx_3","pb_childtx_4","pb_accommodations", "pb_income","pb_caretaker","pb_caretaker_living","pb_single_parent","pb_caregiver1_2","pb_caregiver1_3","pb_caregiver1_4","pb_caregiver1_5","pb_caregiver1_6","pb_caregiver1_7","pb_caregiver2_2","pb_caregiver2_3","pb_caregiver2_4","pb_caregiver2_5","pb_caregiver_6","pb_caregiver2_7", "pb_parenttx_1","pb_parenttx_2","pb_parenttx_3","pb_ppd_1"),
+                      c("pb_childsex","pb_childgender","pb_childethnicity","pb_birthorder","pb_grade","pb_school","pb_childmeds_1","pb_childtx_1","pb_childtx_2","pb_childtx_3","pb_childtx_4","pb_accommodations", "pb_income","pb_caretaker","pb_caretaker_living","pb_single_parent","pb_caregiver1_2","pb_caregiver1_3","pb_caregiver1_4","pb_caregiver1_5","pb_caregiver1_6","pb_caregiver1_7","pb_caregiver2_2","pb_caregiver2_3","pb_caregiver2_4","pb_caregiver2_5","pb_caregiver_6","pb_caregiver2_7","pb_parenttx_1","pb_parenttx_2","pb_parenttx_3","pb_ppd_1"))
+
+# Now mapping over all dataframes to integrate the numeric data (even numbers) with the choice text data (odd numbers)
+
+qualtrics_files
+
+integrated_dfs <- pmap(list(x = c(2,4,6,8,10,12), y = c(1,3,5,7,9,11), z = fac_vars_list), function(x, y, z){
+  
+  no_tests_qualtrics[x] %>% 
+    integrate_dfs(choice_df_map = no_tests_qualtrics[y], factor_vars_map = z)
+  
+}) %>% 
+  print()
+
+```
+
+```{r diagnostics for integration function}
+
+## I think all of this is unnecessary now since I found the error in my function but I'm keeping it here for at least a bit just in case I'm wrong about the fix
+
+# # So it's not that columns are named differently across datasets
+# 
+# check_cols_num <- enframe(no_tests_qualtrics[4]) %>% 
+#   dplyr::select(value) %>% 
+#   unnest(value)
+# 
+# check_cols_ct <- enframe(no_tests_qualtrics[3]) %>% 
+#   dplyr::select(value) %>% 
+#   unnest(value)
+# 
+# names(check_cols_num) == names(check_cols_ct)
+# 
+# # I think something is going wrong with the selection process for the numeric data frame, NOPE! There was just a typo in the Qualtrics survey on one of the variable names (p3_covid_test_result instead of p3m_covid_test_result). Could also be a result of Qualtrics character limits on variable names... These functions seem to be working at least as of right now.
+# 
+# testmap_num_df <- no_tests_qualtrics[4] %>% 
+#   create_num_df(factor_vars = c("p3m_childsex","p3m_childgender","p3m_childethnicity","p3m_grade","p3m_school","p3m_childmeds_1","p3m_childtx_1","p3m_childtx_2","p3m_childtx_3","p3m_childtx_4","p3m_accommodations", "p3m_accommodations_2","p3m_income","p3m_caretaker","p3m_caretaker_living","p3m_single_parent","p3m_caregiver1_2","p3m_caregiver1_3","p3m_caregiver1_4","p3m_caregiver1_5", "p3m_caregiver1_6","p3m_caregiver1_7","p3m_caregiver2_2","p3m_caregiver2_3","p3m_caregiver2_4","p3m_caregiver2_5","p3m_caregiver2_6","p3m_caregiver2_7","p3m_parenttx_1","p3m_parenttx_2", "p3m_parenttx_3","p3m_ppd_1","p3m_covid_spread","p3m_covid_effect","p3m_covid_sick","p3m_covid_symptoms","p3m_covid_test","p3_covid_test_result","p3m_covid_support","p3m_teletherapy1", "p3m_teletherapy2","p3m_online_tx1","p3m_online_tx2")) %>% 
+#   print()
+# 
+# testmap_num_vec <- no_tests_qualtrics[4] %>% 
+#   get_num_names(factor_vars = c("p3m_childsex","p3m_childgender","p3m_childethnicity","p3m_grade","p3m_school","p3m_childmeds_1","p3m_childtx_1","p3m_childtx_2","p3m_childtx_3","p3m_childtx_4","p3m_accommodations", "p3m_accommodations_2","p3m_income","p3m_caretaker","p3m_caretaker_living","p3m_single_parent","p3m_caregiver1_2","p3m_caregiver1_3","p3m_caregiver1_4","p3m_caregiver1_5", "p3m_caregiver1_6","p3m_caregiver1_7","p3m_caregiver2_2","p3m_caregiver2_3","p3m_caregiver2_4","p3m_caregiver2_5","p3m_caregiver2_6","p3m_caregiver2_7","p3m_parenttx_1","p3m_parenttx_2", "p3m_parenttx_3","p3m_ppd_1","p3m_covid_spread","p3m_covid_effect","p3m_covid_sick","p3m_covid_symptoms","p3m_covid_test","p3_covid_test_result","p3m_covid_support","p3m_teletherapy1", "p3m_teletherapy2","p3m_online_tx1","p3m_online_tx2")) %>% 
+#   print()
+# 
+# ## Alright, can we reporduce the error if we input things manually? Trying to figure out if this is something happening with the final funciton or the map itself
+# 
+# test_final_func <- enframe(no_tests_qualtrics[3]) %>%  # Doing it this way to avoid having the named part of the list appended to the beginning of each variable name
+#   dplyr::select(value) %>% 
+#   unnest(value) %>%  
+#   ungroup() %>% 
+#   dplyr::select(-any_of(testmap_num_vec)) %>% 
+#   bind_cols(testmap_num_df) %>% 
+#   mutate(across(any_of({{factor_vars}}), as.factor)) # Also converting all variables that are factors to factors from character values here
+# 
+# 
+# enframe(integrated_dfs[4]) %>% 
+#   dplyr::select(value) %>% 
+#   unnest(value) %>% 
+#   glimpse()
+
+```
+```{r}
+
+qualtrics_files
+
+```
+
+
+```{r a test for integrated data frames to make sure factor variables actually converted}
+
+# Pretty basic test here, see if a variable that should be a factor in the dataset is + see if a variable that should be numeric is
+
+# Checking variable class once
+
+enframe(integrated_dfs[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select(y3m_sitbi_3a) %>% 
+  mutate(class = map(cur_data(),class)) %>%
+  slice_head() %>% 
+  dplyr::select(class) %>% 
+  unnest(class) %>% 
+  deframe()
+
+# Writing a function to check variable class
+
+check_class <- function(.data, var){
+  
+  vec <- enframe(.data) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  dplyr::select({{var}}) %>% 
+  mutate(class = map(cur_data(),class)) %>%
+  slice_head() %>% 
+  dplyr::select(class) %>% 
+  unnest(class) %>% 
+  deframe()
+  
+  vec
+  
+}
+
+# Check a variable that should be a factor
+
+integrated_dfs[1] %>% 
+  check_class(var = "y3m_sitbi_3a")
+
+# Check a variable that should be numeric
+
+integrated_dfs[1] %>% 
+  check_class(var = "y3m_idas_a_2")
+
+# Map through doing a random spot check for all dataframes
+
+vars_to_check <- c("y3m_sitbi_4a", "y3m_shs_7", "p3m_caregiver2_4", "p3m_child_aces_9", "yb_ppd_1", "yb_shaps_10", "yb_interview", "yb_intro_time_page_submit",
+                   "pb_income", "pb_cdi_6", "pb_childmeds_1", "pb_childage")
+
+map2(c(1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6), vars_to_check, ~{
+  
+  integrated_dfs[.x] %>% 
+    check_class(var = .y)
+  
+})
+  
+# Could build out an even more comprehensive test where we map through all variables but not going to do that yet unless we run into issues
+
+```
+
+```{r figuring out which columns are different across remote and in person administrations of youth baseline}
+
+qualtrics_files
+
+yb_ip <- enframe(integrated_dfs[3]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value)
+  
+yb_rem <- enframe(integrated_dfs[4]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value)
+
+compare_df_cols(yb_ip, yb_rem) %>% 
+  filter(is.na(yb_ip) | is.na(yb_rem))
+
+## Need to add theese columns into the youth baseline in person data frame before we can combine them via bind_rows (Also need to relocate columns so they're in the same order in both dfs)
+
+yb_col_names <- compare_df_cols(yb_ip, yb_rem) %>% 
+  filter(is.na(yb_ip) | is.na(yb_rem)) %>% 
+  dplyr::select(column_name) %>% 
+  deframe() %>% 
+  print()
+
+
+yb_ip_all <- yb_ip %>% 
+  bind_cols(yb_rem %>% slice(1:13) %>% dplyr::select(all_of(yb_col_names))) %>% 
+  mutate(across(all_of(yb_col_names), ~{.x <- NA}),
+         location = "In Person") %>% 
+  relocate(everything(), all_of(yb_col_names)) # Relocating the variables so we can bind rows without accidentally giving bogus values for the wrong variables
+
+yb_rem_all <- yb_rem %>% 
+  relocate(everything(), all_of(yb_col_names)) %>%  # Relocating the variables so we can bind rows without accidentally giving bogus values for the wrong variables
+  mutate(location = "Remote")
+# Now checking to make sure there are no columns that don't match (And there aren't!)
+
+compare_df_cols(yb_ip_all, yb_rem_all) %>% 
+  filter(is.na(yb_ip_all) | is.na(yb_rem_all))
+
+# Can now bind rows to put both types of administration into one dataframe
+
+yb_all <- yb_ip_all %>% 
+  bind_rows(yb_rem_all)
+
+glimpse(yb_all) # Doing a visual inspection test here (are the columns at the end, the block of NAs in the right place, etc.). Not the best, might be able to improve it
+
+
+```
+
+```{r figuring out which columns are different across remote and in person administrations of parent baseline}
+
+pb_ip <- enframe(integrated_dfs[5]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value)
+  
+pb_rem <- enframe(integrated_dfs[6]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value)
+
+compare_df_cols(pb_ip, pb_rem) %>% 
+  filter(is.na(pb_ip) | is.na(pb_rem))
+
+## Need to add theese columns into the youth baseline in person data frame before we can combine them via bind_rows (Also need to relocate columns so they're in the same order in both dfs)
+
+pb_col_names <- compare_df_cols(pb_ip, pb_rem) %>% 
+  filter(is.na(pb_ip) | is.na(pb_rem)) %>% 
+  dplyr::select(column_name) %>% 
+  deframe() %>% 
+  print()
+
+pb_ip_all <- pb_ip %>% 
+  bind_cols(pb_rem %>% slice(1:15) %>% dplyr::select(all_of(pb_col_names))) %>% 
+  mutate(across(all_of(pb_col_names), ~{.x <- NA}),
+         location = "In Person",
+         pb_siblings_2 = as.numeric(pb_siblings_2)) %>% 
+  relocate(everything(), all_of(pb_col_names)) # Relocating the variables so we can bind rows without accidentally giving bogus values for the wrong variables
+
+pb_rem_all <- pb_rem %>% 
+  relocate(everything(), all_of(pb_col_names)) %>%  # Relocating the variables so we can bind rows without accidentally giving bogus values for the wrong variables
+  mutate(location = "Remote")
+# Now checking to make sure there are no columns that don't match (And there aren't!)
+
+compare_df_cols(pb_ip_all, pb_rem_all) %>% 
+  filter(is.na(pb_ip_all) | is.na(pb_rem_all))
+
+compare_df_cols_same(pb_ip_all, pb_rem_all)
+
+# Can now bind rows to put both types of administration into one dataframe
+
+pb_all <- pb_ip_all %>% 
+  bind_rows(pb_rem_all) %>% 
+  filter(pb_lsmh_id != "LSMH000" & pb_lsmh_id != "LSMH000000") # Filtering out test IDs not caught by function earlier
+
+glimpse(pb_all) # Doing a visual inspection test here (are the columns at the end, the block of NAs in the right place, etc.). Not the best, might be able to improve it
+
+
+```
+
+```{r putting together youth baseline and youth follow up surveys}
+
+y3m_df <- enframe(integrated_dfs[1]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  print()
+
+youth_all_init <- yb_all %>% 
+  left_join(y3m_df, by = c("yb_lsmh_id" = "y3m_lsmh_id"))
+
+## Have 29 columns with the same names across both data frames, we'll want to rename those before joining the baseline and follow-up for good
+
+youth_cols_rename <- youth_all_init %>% 
+  dplyr::select(ends_with(".y")) %>% 
+  names() %>% 
+  enframe() %>% 
+  mutate(name = str_remove(value, "[:punct:]y")) %>% 
+  dplyr::select(name) %>% 
+  deframe() %>% 
+  print()
+
+# Renaming baseline variables
+
+yb_all_renamed <- yb_all %>% 
+  rename_with(
+    .fn = ~glue("yb_","{.}"),
+    .cols = all_of(youth_cols_rename))
+  
+# Renaming follow-up variables
+
+y3m_df_renamed <- y3m_df %>% 
+  rename_with(
+    .fn = ~glue("y3m_","{.}"),
+    .cols = all_of(youth_cols_rename))
+
+# Now joining the baseline and follow-up dataframes
+
+youth_all <- yb_all_renamed %>% 
+  left_join(y3m_df_renamed, by = c("yb_lsmh_id" = "y3m_lsmh_id"))
+
+glimpse(youth_all)
+
+```
+
+```{r tests for joining youth baseline and follow up}
+
+# Any duplicate names? Nope!
+
+youth_all %>% 
+  dplyr::select(ends_with(".y")) %>% 
+  names()
+
+# Do we have the number of valid IDs at follow-up that we'd expect?
+
+nrow(youth_all) # Don't see additional rows above and beyond baseline values (which can happen if the join goes awry)
+
+# Initially seems like we might be missing one person from the follow-up data frame in the all dataframe
+
+valid_y3m_ids <- youth_all %>% 
+  filter(!is.na(y3_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+valid_y3m <- y3m_df %>% 
+  filter(!is.na(y3_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+# The missing id doesn't seem to appear in the baseline, maybe there was a consistent typo across validation?
+
+missing_id <- y3m_df %>% 
+  filter(y3_lsmh_id_validate %in% youth_all$y3_lsmh_id_validate == FALSE) %>% 
+  dplyr::select(y3_lsmh_id_validate) %>% 
+  deframe() %>% 
+  print()
+
+yb_all %>% 
+  filter(yb_lsmh_id == missing_id)
+
+pb_all %>% 
+  filter(pb_lsmh_id == missing_id)
+
+y3m_df %>% 
+  filter(y3_lsmh_id_validate == missing_id) %>% 
+  dplyr::select(progress, progress_calc)
+
+# Can try to join based on fuzzyjoin where there might have been a typo, but that gives us way too many possibilities
+
+library(fuzzyjoin)
+
+youth_all_fuzzy <- yb_all_renamed %>% 
+  stringdist_left_join(y3m_df_renamed, by = c("yb_lsmh_id" = "y3m_lsmh_id"), max_dist = 1)
+
+valid_y3m_ids <- youth_all_fuzzy %>% 
+  filter(!is.na(y3_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+# Is it in the data at the beginning? Nope!
+
+# For youth
+
+enframe(named_qualtrics[5]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  filter(yb_lsmh_id == missing_id)
+
+enframe(named_qualtrics[7]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  filter(yb_lsmh_id == missing_id)
+
+# For parents
+
+enframe(named_qualtrics[9]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  filter(pb_lsmh_id == missing_id)
+
+enframe(named_qualtrics[11]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  filter(pb_lsmh_id == missing_id)
+
+# Let's see if we can match off of any other info
+
+# youth_all <- yb_all_renamed %>% 
+#   left_join(y3m_df_renamed, by = c("yb_lsmh_id" = "y3m_lsmh_id", "yb_childname" = "y3_childname"))
+
+yb_all_renamed %>% 
+  dplyr::select(contains("name"))
+  
+glimpse(yb_all_renamed)
+
+glimpse(y3m_df)
+
+y3m_df %>% 
+  filter(y3_lsmh_id_validate %in% youth_all$y3_lsmh_id_validate == FALSE)
+
+youth_all %>% 
+  filter(str_detect(yb_lsmh_id, "LSMH001")) %>% # Sam beginning sequence as missing ID
+  dplyr::select(yb_lsmh_id, y3_lsmh_id_validate, y3m_progress)
+
+# Is there data from the parents at follow-up we can cross-reference? Nope...
+
+p3m_df <- enframe(integrated_dfs[2]) %>% 
+  dplyr::select(value) %>% 
+  unnest(value) %>% 
+  print()
+
+p3m_df %>% 
+  filter(p3m_lsmh_id == missing_id)
+
+# But this person only completed 8% of the follow-up survey (Though that equates to making it all the way through the IDAS data + SRET data)
+
+# Therefore as of right now I'm going to move on without matching it, though I've contacted the coordinators re: figuring out who this person is.
+
+y3m_df %>% 
+  filter(y3_lsmh_id_validate == missing_id) %>% 
+  dplyr::select(progress, progress_calc)
+
+y3m_df %>% 
+  filter(y3_lsmh_id_validate == missing_id)
+
+```
+```{r putting together parent baseline and youth follow up surveys}
+
+# Doing an initial join to identify duplicate names of variables
+
+parent_all_init <- pb_all %>% 
+  left_join(p3m_df, by = c("pb_lsmh_id" = "p3m_lsmh_id"))
+
+## Have 29 columns with the same names across both data frames, we'll want to rename those before joining the baseline and follow-up for good
+
+parent_cols_rename <- parent_all_init %>% 
+  dplyr::select(ends_with(".y")) %>% 
+  names() %>% 
+  enframe() %>% 
+  mutate(name = str_remove(value, "[:punct:]y")) %>% 
+  dplyr::select(name) %>% 
+  deframe() %>% 
+  print()
+
+# Renaming baseline variables
+
+pb_all_renamed <- pb_all %>% 
+  rename_with(
+    .fn = ~glue("pb_","{.}"),
+    .cols = all_of(parent_cols_rename))
+  
+# Renaming follow-up variables
+
+p3m_df_renamed <- p3m_df %>% 
+  rename_with(
+    .fn = ~glue("p3m_","{.}"),
+    .cols = all_of(parent_cols_rename))
+
+# Now joining the baseline and follow-up dataframes
+
+parent_all <- pb_all_renamed %>% 
+  left_join(p3m_df_renamed, by = c("pb_lsmh_id" = "p3m_lsmh_id"))
+
+glimpse(parent_all)
+
+```
+
+
+```{r tests for joining parent baseline and follow up}
+
+# Any duplicate names? Nope!
+
+parent_all %>% 
+  dplyr::select(ends_with(".y")) %>% 
+  names()
+
+# Do we have the number of valid IDs at follow-up that we'd expect?
+
+nrow(parent_all) # Don't see additional rows above and beyond baseline values (which can happen if the join goes awry)
+
+# And the valid IDs match!
+
+valid_p3m_ids <- parent_all %>% 
+  filter(!is.na(p3m_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+valid_p3m <- p3m_df %>% 
+  filter(!is.na(p3m_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+```
+
+
+```{r joining youth and parent surveys}
+
+ttt_1_init <- youth_all %>% 
+  left_join(parent_all, by = c("yb_lsmh_id" = "pb_lsmh_id"))
+
+all_cols_rename <- ttt_1_init %>% 
+  dplyr::select(ends_with(".y")) %>% 
+  names() %>% 
+  enframe() %>% 
+  mutate(name = str_remove(value, "[:punct:]y")) %>% 
+  dplyr::select(name) %>% 
+  deframe() %>% 
+  print()
+
+# Renaming baseline variables
+
+youth_all_renamed <- youth_all %>% 
+  rename_with(
+    .fn = ~glue("y_","{.}"),
+    .cols = all_of(all_cols_rename))
+  
+# Renaming follow-up variables
+
+parent_all_renamed <- parent_all %>% 
+  rename_with(
+    .fn = ~glue("p_","{.}"),
+    .cols = all_of(all_cols_rename))
+
+ttt_1 <- youth_all_renamed %>% 
+  left_join(parent_all_renamed, by = c("yb_lsmh_id" = "pb_lsmh_id"))
+
+glimpse(ttt_1)
+
+```
+
+```{r tests for joining youth and parent surveys}
+
+# Any duplicate names? Nope!
+
+ttt_1 %>% 
+  dplyr::select(ends_with(".y")) %>% 
+  names()
+
+# Do we have the number of valid IDs at follow-up that we'd expect?
+
+nrow(ttt_1) # Don't see additional rows above and beyond baseline values (which can happen if the join goes awry)
+
+# And the valid IDs match!
+
+valid_p3m_ids <- ttt_1 %>% 
+  filter(!is.na(p3m_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+valid_p3m <- ttt_1 %>% 
+  filter(!is.na(p3m_lsmh_id_validate)) %>% 
+  tally() %>% 
+  deframe() %>% 
+  print()
+
+```
+
+```{r preprocessing the ppd questions for one hot encoding}
+
+# These variables have multiresponse but also commas built in to each response. Therefore, I think I'll replace the commas in each answer choice with ";" to facilitate cleaning
+
+ttt_1_recode <- ttt_1 %>% 
+  mutate(p3m_ppd_1 = factor(str_replace_all(p3m_ppd_1, "\\,\\s+", "; ")), # Saying comma and then whitespace replaced with semicolon because I noticed when multiple answers were selected there was no whitespace between that comma and the next answer, while the written commas in the answer choices consistently had whitespace after them
+         pb_ppd_1 = factor(str_replace_all(pb_ppd_1, "\\,\\s+", "; ")),
+         yb_ppd_1 = factor(str_replace_all(yb_ppd_1, "\\,\\s+", "; ")),
+         y3m_ppd_1 = factor(str_replace_all(y3m_ppd_1, "\\,\\s+", "; ")),
+         pb_birthorder = as.character(pb_birthorder), # These variables were free response instead of factor and someone included identifying info in the birth order responses
+         p3m_birthorder = as.character(p3m_birthorder))
+
+ttt_1_recode %>% 
+  dplyr::select(contains("ppd_1"),-contains("tim"))
+
+
+```
+
+
+```{r creating one hot encoding function for factor variables where multiple answer choices could be selected}
+
+## Finding which variables allow for multiple variables 
+
+vars_commas <- ttt_1_recode %>% 
+  dplyr::select(where(is.factor)) %>% # Selecting all variables that are factors
+  mutate(across(everything(),~str_detect(.x, ","))) %>% ## Converting anytime there is a comma in a response to a logical that is TRUE
+  select_if(function(x) any(x == TRUE)) %>%  ## Now only selecting down to any columns that contain commas
+  dplyr::select(-contains("text"),-contains("income")) %>% ## Removing text variables that should keep their commas
+  names() ## Getting the variable names to use
+
+## Now going to use the fastDummies package to dummy code these responses https://cran.r-project.org/web/packages/fastDummies/vignettes/making-dummy-variables.html
+
+# Do it once
+
+one_hot_comp <- ttt_1_recode %>% 
+  dplyr::select(yb_sitbi_2b) %>% 
+  dummy_cols(split = ",") %>% 
+  clean_names() %>%
+  dplyr::select(-yb_sitbi_2b) %>% # Need this for the function, but can omit to do visual inspection that it's working correctly
+  print()
+
+# Write a function
+
+one_hot_encode <- function(.data, var){
+  
+  .data <- .data %>% 
+  dplyr::select({{var}}) %>% 
+  dummy_cols(split = ",") %>% 
+  clean_names() %>% 
+  dplyr::select(-{{var}})
+  
+} 
+
+## Test the function
+
+one_hot_func <- ttt_1_recode %>% 
+  one_hot_encode(var = yb_sitbi_2b) %>% 
+  print()
+
+# Does the function and harcoding produce the same results? Yes!
+
+diffdf(one_hot_comp, one_hot_func)
+
+```
+
+```{r mapping one hot encoding function across all multiresponse factor variables}
+
+one_hot_vars <- map_dfc(vars_commas, ~{
+  
+  ttt_1_recode %>% 
+    one_hot_encode(var = .data[[.x]])
+  
+})
+
+ttt_1_hot <- ttt_1_recode %>% 
+  bind_cols(one_hot_vars) # Binding recoded factors to dataframe with all other info
+
+glimpse(ttt_1_hot)
+
+```
+
+Issues identified in the README file:
+
+Missing Measures on Qualtrics Surveys:
+SCARED-P
+parent has a duplicated item (item 10 repeated: my child feels nervous when meeting new people; should have been item 32: my child feels shy when meeting new people)
+_scared_c_1 (supposed to be item 32) is the same as _scared_a_10 (item 10)
+SCARED-C 
+youth item 39 was added on June 19, 2020 [yb_scared_c_11 and y3m_scared_c_11; I feel nervous when I am with other children or adults and I have to do something while they watch me (for example: read aloud, speak, play a game, play a sport)] 
+_scared_c_11 is supposed to be item 39, _scared_c_10 is supposed to be item 41, _scared_c_9 is supposed to be item 40.
+
+```{r creating composites using a scoring csv file}
+
+## Pivoting the numeric data we need to figure out longer to have it work with the scoring data frame
+
+ttt_comp_init <- ttt_1 %>% 
+  dplyr::select(yb_response_id, where(is.numeric), -contains("tim"),-contains("status"),-contains("_progress"),-contains("duration"),-contains("location"),-contains("finished"),
+                -contains("_sc0"),-contains("_tlcond"),-contains("sitbi"),-contains("_pds"),-contains("ppd"),-contains("covid"),-contains("caretaker"),-contains("caregiver"),
+                -contains("childage"),-contains("siblings"),-contains("accomodations"),-contains("dependent"),-contains("atts"),-contains("parenttx"),-contains("interview"),
+                -contains("online"),-contains("teletherapy"),-contains("wrapup_optin"),-contains("_demographic"),-contains("study_admin")) %>% 
+  pivot_longer(!yb_response_id, names_to = "variable_name", values_to = "raw_score") %>% 
+  print()
+
+ttt_comp_names <- ttt_1 %>% 
+  dplyr::select(yb_response_id, where(is.numeric), -contains("tim"),-contains("status"),-contains("_progress"),-contains("duration"),-contains("location"),-contains("finished"),
+                -contains("_sc0"),-contains("_tlcond"),-contains("sitbi"),-contains("_pds"),-contains("ppd"),-contains("covid"),-contains("caretaker"),-contains("caregiver"),
+                -contains("childage"),-contains("siblings"),-contains("accomodations"),-contains("dependent"),-contains("atts"),-contains("parenttx"),-contains("interview"),
+                -contains("online"),-contains("teletherapy"),-contains("wrapup_optin"),-contains("_demographic"),-contains("study_admin")) %>% 
+  names()
+
+## Setting up a dataframe with info on variables reverse scoring and which measure they belong to
+
+dp5_score_init <- read_csv("dp5_p1_scoring.csv") %>% 
+  clean_names() %>% 
+  rename(reverse_coded = reverse_coded_0_no_1_yes_other_na) %>% 
+  mutate(reverse_coded = factor(case_when(
+    reverse_coded == 0 ~ "No",
+    is.na(reverse_coded) ~ "No",
+    reverse_coded == 1 ~ "Yes"
+  ))) %>% 
+  distinct(variable_name, .keep_all = TRUE) %>% 
+  filter(variable_name %in% ttt_comp_names) %>% 
+  print()
+
+## Trying to join raw scores to data frame with scoring info
+
+all_composites <- ttt_comp_init %>% 
+  left_join(dp5_score_init) %>% 
+  mutate(measure = case_when(
+    survey == "youth_baseline_inperson" ~ glue("yb_{measure}"),
+    survey == "youth_baseline_remote" ~ glue("yb_{measure}"),
+    survey == "parent_baseline_inperson" ~ glue("pb_{measure}"),
+    survey == "parent_baseline_remote" ~ glue("pb_{measure}"),
+    survey == "youth_3m" ~ glue("y3m_{measure}"),
+    survey == "parent_3m" ~ glue("p3m_{measure}"),
+    TRUE ~ measure
+  )) %>% 
+  group_by(measure) %>% 
+  mutate(max_score = max(raw_score, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(proc_score = case_when(
+    reverse_coded == "Yes" ~ max_score - raw_score,
+    reverse_coded == "No" ~ raw_score,
+    TRUE ~ NA_real_
+  )) %>% 
+  relocate(yb_response_id, variable_name, reverse_coded, raw_score, proc_score, measure, everything()) %>% 
+  group_by(yb_response_id, measure) %>%
+  summarise(mean = mean(proc_score, na.rm = TRUE),
+            sum = sum(proc_score, na.rm = TRUE)) %>% 
+  mutate(sum = if_else(is.na(mean), NA_real_, sum),
+         mean = if_else(is.na(sum), NA_real_, mean)) %>% 
+  pivot_wider(id_cols = yb_response_id, names_from = measure, values_from = c(mean,sum)) %>% 
+  dplyr::select(-contains("study_admin"),-contains("demographic")) %>% 
+  print()
+
+```
+
+```{r merging composites with other data}
+
+ttt <- ttt_1_hot %>% 
+  left_join(all_composites, by = "yb_response_id")
+
+glimpse(ttt)
+
+```
+
+```{r creating a non de identified versions of the full dataset}
+
+## See the end of ttt_phase_1_lifepak_cleaning.Rmd for new code writing a version of this data that contains the ids that had to be corrected by hand
+
+# write_csv(ttt, "cleaned_qualtrics_ttt_phase_1.csv")
+write_csv(ttt, "cleaned_qualtrics_ttt_phase_1_fixed_220604.csv")
+
+```
+
