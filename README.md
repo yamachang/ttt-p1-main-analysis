@@ -50,7 +50,7 @@ Also inputs `dp5_p1_scoring.csv`
 Outputs (though both are commented out) `yb_lsmh_ids_dates.csv` and `cleaned_qualtrics_ttt_phase_1.csv`. Moreover, `ttt_phase1_qualtrics_cleaning.Rmd` outputs `cleaned_qualtrics_ttt_phase_1_fixed_220604.csv`, whereas `ttt_phase1_qualtrics_cleaning_fix.Rmd` (which has various hard-coded changes) outputs `cleaned_qualtrics_ttt_phase_1_fixed_220606.csv`.
 - TODO: Is `cleaned_qualtrics_ttt_phase_1_fixed_220604.csv` or `cleaned_qualtrics_ttt_phase_1_fixed_220606.csv` ever used later? Seems later scripts just input `cleaned_qualtrics_ttt_phase_1.csv`. Should the later scripts be updated? Isaac said that he recalls revising the cleaning script in May 2022 just to keep a variable that had been deleted or something like that.
 
-#### `ttt_phase1_lifepak_cleaning.Rmd` (not yet on repo)
+#### `ttt_phase1_lifepak_cleaning.Rmd`
 
 Inputs the following 5 raw CSV files (out of the 10 from LifePak)
 - `3T_P1_V1_NIS_2020_Mar_02.csv`
@@ -63,7 +63,7 @@ Also inputs `cleaned_qualtrics_ttt_phase_1.csv`
 
 Outputs `cleaned_combined_qualtrics_lifepak_ttt_phase_1.csv`, `cleaned_lifepak_ttt_phase_1.csv`, and `cleaned_qualtrics_ttt_phase_1.csv`
 
-#### `deid_ttt_phase_1.Rmd` (not yet on repo)
+#### `deid_ttt_phase_1.Rmd`
 
 Inputs cleaned LifePak data in `cleaned_lifepak_ttt_phase_1.csv` and cleaned Qualtrics data in `cleaned_qualtrics_ttt_phase_1.csv`
 
