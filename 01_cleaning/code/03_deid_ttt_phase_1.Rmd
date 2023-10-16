@@ -21,6 +21,7 @@ knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE
 ```{r}
 
 library(tidyverse)
+library(janitor)
 
 ```
 
