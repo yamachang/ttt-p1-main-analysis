@@ -326,52 +326,145 @@ no_issues == length(unique(dat$lifepak_id))
 # Remove rows with negative scores ----
 # ---------------------------------------------------------------------------- #
 
-# TODO: Josip to insert code for excluding negative scores (e.g., -1, -2)
+# Inspection of range for 8 node variables shows that 2 participants have some 
+# negative values (-1, -2) for "interest"
 
+summary(dat[, node_vars])
+table(dat$interest)
 
+dat_minus0 <- dat[dat[, "interest"] < 0 & !is.na(dat[, "interest"]), ]
 
+dat_minus0_ids <- pull(unique(dat[dat[, "interest"] < 0 & !is.na(dat[, "interest"]), "lifepak_id"]))
 
+dat_minus0_ids == c(230042, 682098)
 
-# TODO: Josip to compute sample size at this point
+# View(dat[dat$lifepak_id %in% dat_minus0_ids, ])
 
+# As data from these subjects are not reliable, exclude them from analyses,
+# leaving 105 participants at this point
 
+dat <- dat[!(dat$lifepak_id %in% dat_minus0_ids), ]
 
-
+n_distinct(dat$lifepak_id) == 105
 
 # ---------------------------------------------------------------------------- #
-# Exclude participants with too few observations ----
+# Further clean data ----
 # ---------------------------------------------------------------------------- #
 
-# TODO: Josip to insert code for excluding participants who do not have at least 
-# 60 observations across all nodes
+# Note: One row has "hr_since_start" value but NAs on all nodes. Laura Jans indicated 
+# on 4/3/24 that "prefer not to answer" was not an option for node variables and that 
+# participants could not just click "yes" to skip the question without moving the slider. 
+# Thus, it is unclear why these responses are NA. However, this participant is excluded
+# below due to having insufficient observations across all nodes.
 
+nrow(dat[!is.na(dat$hr_since_start) & rowSums(is.na(dat[, node_vars])) == length(node_vars), ]) == 1
 
+# View(dat[!is.na(dat$hr_since_start) & rowSums(is.na(dat[, node_vars])) == length(node_vars), ])
+# View(dat[dat$lifepak_id == 806721, ]) # "response_no" 14 with "notification_time" "2020-09-22 18:04:51"
 
+# ---------------------------------------------------------------------------- #
+# Exclude participants without at least 60 observations across all nodes ----
+# ---------------------------------------------------------------------------- #
 
+# Create indicator of complete data on all 8 nodes
 
-# TODO: Josip to compute sample size at this point
+dat$ind_nomiss <- NA
+dat$ind_nomiss <- ifelse(rowSums(!is.na(dat[node_vars])) == length(node_vars), 1, 0)
 
+# Compute number of rows with complete data on all nodes per person
 
+comp_all_df <- aggregate(ind_nomiss ~ lifepak_id, data = dat, FUN = function(x) sum(x == 1))
 
+names(comp_all_df)[names(comp_all_df) == "ind_nomiss"] <- "n_comp_rows"
 
+# Get IDs of subjects with 60 or more responses on all nodes
+
+ids_include <- comp_all_df$lifepak_id[comp_all_df$n_comp_rows >= 60]
+
+# Exclude subjects with less than 60 responses on all nodes
+
+dat <- dat[dat$lifepak_id %in% ids_include, ]
+
+# Remove indicator variable
+
+dat$ind_nomiss <- NULL
+
+# 64 participants remain at this point
+
+n_distinct(dat$lifepak_id) == 64
 
 # ---------------------------------------------------------------------------- #
 # Exclude participants with too little variation ----
 # ---------------------------------------------------------------------------- #
 
-# TODO: Josip to insert code to exclude participants who do not have enough 
-# variation on their time series
+# Compute standard deviation of each node by participant
 
+sd_df <- data.frame(lifepak_id = unique(dat$lifepak_id))
 
+sd_df$interest <- tapply(dat$interest, dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$sad      <- tapply(dat$sad,      dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$bad      <- tapply(dat$bad,      dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$energy   <- tapply(dat$energy,   dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$focus    <- tapply(dat$focus,    dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$movement <- tapply(dat$movement, dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$control  <- tapply(dat$control,  dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$fun      <- tapply(dat$fun,      dat$lifepak_id, sd, na.rm = TRUE)
 
+# Explore how many people have at least one node whose SD is below given thresholds
 
+sum(rowSums(sd_df[, node_vars] < 10)  > 0) == 18
+sum(rowSums(sd_df[, node_vars] < 9.5) > 0) == 16
+sum(rowSums(sd_df[, node_vars] < 9)   > 0) == 15
+sum(rowSums(sd_df[, node_vars] < 8)   > 0) == 14
+sum(rowSums(sd_df[, node_vars] < 7)   > 0) == 13
+sum(rowSums(sd_df[, node_vars] < 6)   > 0) == 12
+sum(rowSums(sd_df[, node_vars] < 5)   > 0) == 10
+sum(rowSums(sd_df[, node_vars] < 4)   > 0) == 8
+sum(rowSums(sd_df[, node_vars] < 3)   > 0) == 7
+sum(rowSums(sd_df[, node_vars] < 2)   > 0) == 6
+sum(rowSums(sd_df[, node_vars] < 1)   > 0) == 6
 
-# TODO: Josip to compute sample size at this point if we require SD of at least 1,
-# 2, 3, 4, 5, 6, 7, 8, 9, or 10 (so we can make a final decision)
+# Compute minimum SD by participant
 
+sd_df$min_sd <- apply(sd_df[node_vars], 1, min)
 
+# Visualize distribution of minimum SDs, with cutoff at 5
 
+sd_hists_path <- "./02_networks/results/sd_hists/"
+dir.create(sd_hists_path, recursive = TRUE)
 
+min_sds <- sd_df$min_sd
+
+pdf(file = paste0(sd_hists_path, "min_sd_hist.pdf"))
+hist(min_sds, prob = TRUE, breaks = seq(0, 35, 0.5),
+     main = paste0("Minimum SD Across Nodes for Each Participant (n = ", nrow(sd_df), ")"),
+     xlab = "Minimum SD")
+lines(density(min_sds), col = "blue", lwd = 2)
+abline(v = 5, col = "red", lwd = 2)
+text(5, .10, "Cutoff = 5", col = "red", pos = 4)
+dev.off()
+
+# Visualize distribution of node SDs for all participants, with cutoff at 5
+
+sds <- unlist(sd_df[, node_vars])
+
+pdf(file = paste0(sd_hists_path, "sd_hist.pdf"))
+hist(sds, prob = TRUE, breaks = seq(0, 50, 0.5),
+     main = paste0("SD for Each Node for Each Participant (n = ", nrow(sd_df), ")"),
+     xlab = "SD")
+lines(density(sds), col = "blue", lwd = 2)
+abline(v = 5, col = "red", lwd = 2)
+text(5, .045, "Cutoff = 5", col = "red", pos = 4)
+dev.off()
+
+# Exclude 10 participants who have at least one node whose SD is below 5, leaving
+# 54 participants at this point
+
+exclude_ids <- sd_df$lifepak_id[rowSums(sd_df[, node_vars] < 5) > 0]
+
+dat <- dat[!(dat$lifepak_id %in% exclude_ids), ]
+
+n_distinct(dat$lifepak_id) == 54
 
 # ---------------------------------------------------------------------------- #
 # Align observations to ensure equal time intervals (mimic Mplus's TINTERVAL) ----
@@ -383,22 +476,14 @@ dat_bin <- dat
 
 dat_bin <- dat_bin[!is.na(dat_bin$hr_since_start), ]
 
-# Note: One row has "hr_since_start" value but NAs on all nodes. Laura Jans indicated 
-# on 4/3/24 that "prefer not to answer" was not an option for node variables and that 
-# participants could not just click "yes" to skip the question without moving the slider. 
-# Thus, it is unclear why these responses are NA.
-
-nrow(dat_bin[rowSums(is.na(dat_bin[, node_vars])) == length(node_vars), ]) == 1
-
-# View(dat_bin[rowSums(is.na(dat_bin[, node_vars])) == length(node_vars), ])
-# View(dat_bin[dat_bin$lifepak_id == 806721, ]) # "response_no" 14 with "notification_time" "2020-09-22 18:04:51"
-
 # Bin "hr_since_start"
 
-max_hr_since_start <- ceiling(max(dat_bin$hr_since_start))
+max_hr_since_start <- max(dat_bin$hr_since_start)
 time_interval <- 2.5
 
-breaks <- seq(0, max_hr_since_start + 2, time_interval)
+max_bin_range <- ceiling(max_hr_since_start/time_interval)*time_interval
+
+breaks <- seq(0, max_bin_range, time_interval)
 
 dat_bin$bin_range <- cut(dat_bin$hr_since_start, breaks = breaks, right = FALSE, dig.lab = 4)
 dat_bin$bin_no <- as.integer(dat_bin$bin_range)
