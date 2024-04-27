@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+01_cleaning/data/
+02_networks/data/
+03_ml/data/
+01_cleaning/results/
+02_networks/results/
+03_ml/results/
