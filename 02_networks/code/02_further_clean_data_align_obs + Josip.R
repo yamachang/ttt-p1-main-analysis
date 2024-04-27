@@ -326,201 +326,145 @@ no_issues == length(unique(dat$lifepak_id))
 # Remove rows with negative scores ----
 # ---------------------------------------------------------------------------- #
 
-# TODO: Josip to insert code for excluding negative scores (e.g., -1, -2)
+# Inspection of range for 8 node variables shows that 2 participants have some 
+# negative values (-1, -2) for "interest"
 
-#This shows that the emotions were measured based on a visual analogue scale (VAS) from 0 to 100. For these analyses, we focus 
-#on the symptoms *interest*,*sad*, *bad*,*energy*,*focus*,*movement*, as well as *control* and *positive activity engagement*. 
-#Notice, that there are `r sum(mlvardata[, "interest"] < 0, na.rm = TRUE)` observations with negative scores on the variable *interest*. 
-#As this should not be the case, we further explore these observations.
-#First, we create a subset of the data that only includes these observations and the variables *ID*, *interest*, *sad*,*bad*,*energy*,*focus*,*movement*,
-#*control*,*positive activity engagement*:
+summary(dat[, node_vars])
+table(dat$interest)
 
-dat_minus0 <- dat[dat[, "interest"] < 0 & 
-                                !is.na(dat[, "interest"]), 
-                              c("lifepak_id", "response_time", 
-                                "interest", "sad","bad","energy","focus","movement","control","fun")]
+dat_minus0 <- dat[dat[, "interest"] < 0 & !is.na(dat[, "interest"]), ]
 
-#The negative scores either -1 or -2 and come from `r nsub(mlvardata_minus0$lifepak_id)` subjects. 
-#The complete data (not just those data points with negative values on interest) of these subjects is stored in the following data.frame: 
+dat_minus0_ids <- pull(unique(dat[dat[, "interest"] < 0 & !is.na(dat[, "interest"]), "lifepak_id"]))
 
-dat_neg <- dat[dat$lifepak_id %in% 
-                             unique(dat_minus0$lifepak_id), 
-                           c("lifepak_id", "response_time", 
-                             "interest", "sad","bad","energy","focus","movement","control","fun")]
+dat_minus0_ids == c(230042, 682098)
 
-#As the data from these subjects are not reliable, we decide to exclude them from the analyses. 
-#Thus, we create another data.frame without their data.
+# View(dat[dat$lifepak_id %in% dat_minus0_ids, ])
 
-dat02 <- dat[!(dat$lifepak_id %in% 
-                             unique(dat_minus0$lifepak_id)), ]
+# As data from these subjects are not reliable, exclude them from analyses,
+# leaving 105 participants at this point
 
-rm(dat_neg, dat_minus0)
+dat <- dat[!(dat$lifepak_id %in% dat_minus0_ids), ]
 
-# TODO: Josip to compute sample size at this point
-
-n_distinct(dat02$lifepak_id)
-
-#sample size is n=105 at this point.
+n_distinct(dat$lifepak_id) == 105
 
 # ---------------------------------------------------------------------------- #
-# Exclude participants with too few observations ----
+# Further clean data ----
 # ---------------------------------------------------------------------------- #
 
-# TODO: Josip to insert code for excluding participants who do not have at least 
-# 60 observations across all nodes
+# Note: One row has "hr_since_start" value but NAs on all nodes. Laura Jans indicated 
+# on 4/3/24 that "prefer not to answer" was not an option for node variables and that 
+# participants could not just click "yes" to skip the question without moving the slider. 
+# Thus, it is unclear why these responses are NA. However, this participant is excluded
+# below due to having insufficient observations across all nodes.
 
-#first we need to load Sebastian's package "esmpack". We can move this at the beginning of the script later.
-packages <- rownames(installed.packages())
-if (!"esmpack" %in% packages) {
-  remotes::install_github("secastroal/esmpack")
-}
-library(esmpack)
+nrow(dat[!is.na(dat$hr_since_start) & rowSums(is.na(dat[, node_vars])) == length(node_vars), ]) == 1
 
-# Create indicator variable of valid scores on all 8 variables
-dat02$ind_nomiss <- ifelse(is.na(dat02$interest) &
-                                   is.na(dat02$sad) & is.na(dat02$bad)& is.na(dat02$energy) & is.na(dat02$focus)& is.na(dat02$movement) & is.na(dat02$control)& is.na(dat02$fun) ,NA, 1)
+# View(dat[!is.na(dat$hr_since_start) & rowSums(is.na(dat[, node_vars])) == length(node_vars), ])
+# View(dat[dat$lifepak_id == 806721, ]) # "response_no" 14 with "notification_time" "2020-09-22 18:04:51"
 
-# Get compliance on all variables per person
-comp_all <- calc.nomiss(ind_nomiss, lifepak_id, dat02)
+# ---------------------------------------------------------------------------- #
+# Exclude participants without at least 60 observations across all nodes ----
+# ---------------------------------------------------------------------------- #
 
-# Get IDs of subjects with 60 or more responses on all variables
-id_include <- as.numeric(names(which(comp_all >= 60)))
+# Create indicator of complete data on all 8 nodes
 
-# Exclude subjects with less than 60 responses on both variables
-dat03 <- dat02[dat02$lifepak_id %in% id_include, ]
+dat$ind_nomiss <- NA
+dat$ind_nomiss <- ifelse(rowSums(!is.na(dat[node_vars])) == length(node_vars), 1, 0)
 
-# Remove indicator variable in final subset
-dat03 <- dat03[, 1:15]
+# Compute number of rows with complete data on all nodes per person
 
+comp_all_df <- aggregate(ind_nomiss ~ lifepak_id, data = dat, FUN = function(x) sum(x == 1))
 
-# TODO: Josip to compute sample size at this point
+names(comp_all_df)[names(comp_all_df) == "ind_nomiss"] <- "n_comp_rows"
 
-n_distinct(dat03$lifepak_id)
+# Get IDs of subjects with 60 or more responses on all nodes
 
-#sample size is n=64 at this point.
+ids_include <- comp_all_df$lifepak_id[comp_all_df$n_comp_rows >= 60]
+
+# Exclude subjects with less than 60 responses on all nodes
+
+dat <- dat[dat$lifepak_id %in% ids_include, ]
+
+# Remove indicator variable
+
+dat$ind_nomiss <- NULL
+
+# 64 participants remain at this point
+
+n_distinct(dat$lifepak_id) == 64
 
 # ---------------------------------------------------------------------------- #
 # Exclude participants with too little variation ----
 # ---------------------------------------------------------------------------- #
 
-# TODO: Josip to insert code to exclude participants who do not have enough 
-# variation on their time series
+# Compute standard deviation of each node by participant
 
-sd_interest <- tapply(dat03$interest, dat03$lifepak_id, sd, na.rm = TRUE) 
-sd_sad <- tapply(dat03$sad, dat03$lifepak_id, sd, na.rm = TRUE) 
+sd_df <- data.frame(lifepak_id = unique(dat$lifepak_id))
 
-sd_bad <- tapply(dat03$energy, dat03$lifepak_id, sd, na.rm = TRUE) 
-sd_energy <- tapply(dat03$energy, dat03$lifepak_id, sd, na.rm = TRUE) 
+sd_df$interest <- tapply(dat$interest, dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$sad      <- tapply(dat$sad,      dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$bad      <- tapply(dat$bad,      dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$energy   <- tapply(dat$energy,   dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$focus    <- tapply(dat$focus,    dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$movement <- tapply(dat$movement, dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$control  <- tapply(dat$control,  dat$lifepak_id, sd, na.rm = TRUE) 
+sd_df$fun      <- tapply(dat$fun,      dat$lifepak_id, sd, na.rm = TRUE)
 
-sd_focus <- tapply(dat03$focus, dat03$lifepak_id, sd, na.rm = TRUE) 
-sd_movement <- tapply(dat03$movement, dat03$lifepak_id, sd, na.rm = TRUE) 
+# Explore how many people have at least one node whose SD is below given thresholds
 
-sd_control <- tapply(dat03$control, dat03$lifepak_id, sd, na.rm = TRUE) 
-sd_fun <- tapply(dat03$fun, dat03$lifepak_id, sd, na.rm = TRUE) 
+sum(rowSums(sd_df[, node_vars] < 10)  > 0) == 18
+sum(rowSums(sd_df[, node_vars] < 9.5) > 0) == 16
+sum(rowSums(sd_df[, node_vars] < 9)   > 0) == 15
+sum(rowSums(sd_df[, node_vars] < 8)   > 0) == 14
+sum(rowSums(sd_df[, node_vars] < 7)   > 0) == 13
+sum(rowSums(sd_df[, node_vars] < 6)   > 0) == 12
+sum(rowSums(sd_df[, node_vars] < 5)   > 0) == 10
+sum(rowSums(sd_df[, node_vars] < 4)   > 0) == 8
+sum(rowSums(sd_df[, node_vars] < 3)   > 0) == 7
+sum(rowSums(sd_df[, node_vars] < 2)   > 0) == 6
+sum(rowSums(sd_df[, node_vars] < 1)   > 0) == 6
 
+# Compute minimum SD by participant
 
-sd_lower <- ifelse(sd_interest < 10 | sd_sad < 10 | sd_bad < 10 | sd_energy < 10 | sd_focus < 10 | sd_movement < 10 |  sd_control < 10 |  sd_fun < 10, TRUE, FALSE)
-sd_exclude <- as.numeric(names(which(sd_lower)))
+sd_df$min_sd <- apply(sd_df[node_vars], 1, min)
 
-dat_sd10 <- dat03[!(dat03$lifepak_id %in% sd_exclude), ]
+# Visualize distribution of minimum SDs, with cutoff at 5
 
-n_distinct(dat_sd10$lifepak_id)
+sd_hists_path <- "./02_networks/results/sd_hists/"
+dir.create(sd_hists_path, recursive = TRUE)
 
-#sample size is n=48 at this point. 
+min_sds <- sd_df$min_sd
 
-# TODO: Josip to compute sample size at this point if we require SD of at least 1,
-# 2, 3, 4, 5, 6, 7, 8, 9, or 10 (so we can make a final decision)
+pdf(file = paste0(sd_hists_path, "min_sd_hist.pdf"))
+hist(min_sds, prob = TRUE, breaks = seq(0, 35, 0.5),
+     main = paste0("Minimum SD Across Nodes for Each Participant (n = ", nrow(sd_df), ")"),
+     xlab = "Minimum SD")
+lines(density(min_sds), col = "blue", lwd = 2)
+abline(v = 5, col = "red", lwd = 2)
+text(5, .10, "Cutoff = 5", col = "red", pos = 4)
+dev.off()
 
-sd_lower9.5 <- ifelse(sd_interest < 9.5 | sd_sad < 9.5 | sd_bad < 9.5 | sd_energy < 9.5 | sd_focus < 9.5 | sd_movement < 9.5 |  sd_control < 9.5 |  sd_fun < 9.5, TRUE, FALSE)
-sd_exclude9.5 <- as.numeric(names(which(sd_lower9.5)))
+# Visualize distribution of node SDs for all participants, with cutoff at 5
 
-dat_sd09.5 <- dat03[!(dat03$lifepak_id %in% sd_exclude9.5), ]
+sds <- unlist(sd_df[, node_vars])
 
-n_distinct(dat_sd09.5$lifepak_id)
+pdf(file = paste0(sd_hists_path, "sd_hist.pdf"))
+hist(sds, prob = TRUE, breaks = seq(0, 50, 0.5),
+     main = paste0("SD for Each Node for Each Participant (n = ", nrow(sd_df), ")"),
+     xlab = "SD")
+lines(density(sds), col = "blue", lwd = 2)
+abline(v = 5, col = "red", lwd = 2)
+text(5, .045, "Cutoff = 5", col = "red", pos = 4)
+dev.off()
 
-#n=51 with sd=9.5.
+# Exclude 10 participants who have at least one node whose SD is below 5, leaving
+# 54 participants at this point
 
-sd_lower9 <- ifelse(sd_interest < 9 | sd_sad < 9 | sd_bad < 9 | sd_energy < 9 | sd_focus < 9 | sd_movement < 9 |  sd_control < 9 |  sd_fun < 9, TRUE, FALSE)
-sd_exclude9 <- as.numeric(names(which(sd_lower9)))
+exclude_ids <- sd_df$lifepak_id[rowSums(sd_df[, node_vars] < 5) > 0]
 
-dat_sd09 <- dat03[!(dat03$lifepak_id %in% sd_exclude9), ]
+dat <- dat[!(dat$lifepak_id %in% exclude_ids), ]
 
-n_distinct(dat_sd09$lifepak_id)
-
-
-#n=51 with sd=9.Notice that this is the same as with sd=9.5 that Sebastian used.
-
-sd_lower8 <- ifelse(sd_interest < 8 | sd_sad < 8 | sd_bad < 8 | sd_energy < 8 | sd_focus < 8 | sd_movement < 8 |  sd_control < 8 |  sd_fun < 8, TRUE, FALSE)
-sd_exclude8 <- as.numeric(names(which(sd_lower8)))
-
-dat_sd08 <- dat03[!(dat03$lifepak_id %in% sd_exclude8), ]
-
-n_distinct(dat_sd08$lifepak_id)
-
-#n=53 with sd=8.
-
-sd_lower7 <- ifelse(sd_interest < 7 | sd_sad < 7 | sd_bad < 7 | sd_energy < 7 | sd_focus < 7 | sd_movement < 7 |  sd_control < 7 |  sd_fun < 7, TRUE, FALSE)
-sd_exclude7 <- as.numeric(names(which(sd_lower7)))
-
-dat_sd07 <- dat03[!(dat03$lifepak_id %in% sd_exclude7), ]
-
-n_distinct(dat_sd07$lifepak_id)
-
-#n=53 with sd=7.
-
-sd_lower6 <- ifelse(sd_interest < 6 | sd_sad < 6 | sd_bad < 6 | sd_energy < 6 | sd_focus < 6 | sd_movement < 6 |  sd_control < 6 |  sd_fun < 6, TRUE, FALSE)
-sd_exclude6 <- as.numeric(names(which(sd_lower6)))
-
-dat_sd06 <- dat03[!(dat03$lifepak_id %in% sd_exclude6), ]
-
-n_distinct(dat_sd06$lifepak_id)
-
-#n=54 with sd=6.
-
-sd_lower5 <- ifelse(sd_interest < 5 | sd_sad < 5 | sd_bad < 5 | sd_energy < 5 | sd_focus < 5 | sd_movement < 5 |  sd_control < 5 |  sd_fun < 5, TRUE, FALSE)
-sd_exclude5 <- as.numeric(names(which(sd_lower5)))
-
-dat_sd05 <- dat03[!(dat03$lifepak_id %in% sd_exclude5), ]
-
-n_distinct(dat_sd05$lifepak_id)
-
-#n=56 with sd=5.
-
-sd_lower4 <- ifelse(sd_interest < 4 | sd_sad < 4 | sd_bad < 4 | sd_energy < 4 | sd_focus < 4 | sd_movement < 4 |  sd_control < 4 |  sd_fun < 4, TRUE, FALSE)
-sd_exclude4 <- as.numeric(names(which(sd_lower4)))
-
-dat_sd04 <- dat03[!(dat03$lifepak_id %in% sd_exclude4), ]
-
-n_distinct(dat_sd04$lifepak_id)
-
-#n=57 with sd=4.
-
-sd_lower3 <- ifelse(sd_interest < 3 | sd_sad < 3 | sd_bad < 3 | sd_energy < 3 | sd_focus < 3 | sd_movement < 3 |  sd_control < 3 |  sd_fun < 3, TRUE, FALSE)
-sd_exclude3 <- as.numeric(names(which(sd_lower3)))
-
-dat_sd03 <- dat03[!(dat03$lifepak_id %in% sd_exclude3), ]
-
-n_distinct(dat_sd03$lifepak_id)
-
-#n=57 with sd=3.
-
-sd_lower2 <- ifelse(sd_interest < 2 | sd_sad < 2 | sd_bad < 2 | sd_energy < 2 | sd_focus < 2 | sd_movement < 2 |  sd_control < 2 |  sd_fun < 2, TRUE, FALSE)
-sd_exclude2 <- as.numeric(names(which(sd_lower2)))
-
-dat_sd02 <- dat03[!(dat03$lifepak_id %in% sd_exclude2), ]
-
-n_distinct(dat_sd02$lifepak_id)
-
-#n=59 with sd=2.
-
-sd_lower1 <- ifelse(sd_interest < 1 | sd_sad < 1 | sd_bad < 1 | sd_energy < 1 | sd_focus < 1 | sd_movement < 1 |  sd_control < 1 |  sd_fun < 1, TRUE, FALSE)
-sd_exclude1 <- as.numeric(names(which(sd_lower1)))
-
-dat_sd01 <- dat03[!(dat03$lifepak_id %in% sd_exclude1), ]
-
-n_distinct(dat_sd01$lifepak_id)
-
-#n=60 with sd=1.
+n_distinct(dat$lifepak_id) == 54
 
 # ---------------------------------------------------------------------------- #
 # Align observations to ensure equal time intervals (mimic Mplus's TINTERVAL) ----
@@ -532,22 +476,14 @@ dat_bin <- dat
 
 dat_bin <- dat_bin[!is.na(dat_bin$hr_since_start), ]
 
-# Note: One row has "hr_since_start" value but NAs on all nodes. Laura Jans indicated 
-# on 4/3/24 that "prefer not to answer" was not an option for node variables and that 
-# participants could not just click "yes" to skip the question without moving the slider. 
-# Thus, it is unclear why these responses are NA.
-
-nrow(dat_bin[rowSums(is.na(dat_bin[, node_vars])) == length(node_vars), ]) == 1
-
-# View(dat_bin[rowSums(is.na(dat_bin[, node_vars])) == length(node_vars), ])
-# View(dat_bin[dat_bin$lifepak_id == 806721, ]) # "response_no" 14 with "notification_time" "2020-09-22 18:04:51"
-
 # Bin "hr_since_start"
 
-max_hr_since_start <- ceiling(max(dat_bin$hr_since_start))
+max_hr_since_start <- max(dat_bin$hr_since_start)
 time_interval <- 2.5
 
-breaks <- seq(0, max_hr_since_start + 2, time_interval)
+max_bin_range <- ceiling(max_hr_since_start/time_interval)*time_interval
+
+breaks <- seq(0, max_bin_range, time_interval)
 
 dat_bin$bin_range <- cut(dat_bin$hr_since_start, breaks = breaks, right = FALSE, dig.lab = 4)
 dat_bin$bin_no <- as.integer(dat_bin$bin_range)
