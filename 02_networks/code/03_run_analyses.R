@@ -10,8 +10,17 @@
 # Before running script, restart R (CTRL+SHIFT+F10 on Windows) and set working 
 # directory to parent folder
 
-# Note: Use "bin_no_adj" (created in "further_clean_data_align_obs.R") as the time
-# variable to be included in the models as a covariate (to detrend the time series)
+# The present script runs idiographic and multilevel VAR models on data that have 
+# already been aligned to ensure equal time intervals (mimicking Mplus's TINTERVAL);
+# thus, here we set "tinterval" to 1. The data have also already been detrended. See
+# "02_further_clean_data_align_obs.R" for the alignment and detrending steps.
+
+# TODO: Note where "var2Mplus" and "mlvar2Mplus" functions are defined (i.e., in
+# "02_networks/code/from_sebastian/R/" folder) and when that code was obtained
+
+
+
+
 
 # ---------------------------------------------------------------------------- #
 # Store working directory, check correct R version, load packages ----
@@ -29,51 +38,63 @@ source("./02_networks/code/01_define_functions.R")
 
 groundhog_day <- version_control()
 
-# TODO (JE to review Josip's code below): Load packages
+# TODO (Are all of these packages needed?): Load packages
 
-pkgs_analysis <- c("remotes","MplusAutomation","dplyr","tidyr","Hmisc","networktools","netcontrol")
-groundhog.library(pkgs_analysis, groundhog_day)
 
-#groundhog day reports that the package "esmpack" is not available on CRAN.
-#code below installs it if not already installed and activates it.
+
+
+
+pkgs <- c("remotes", "MplusAutomation", "dplyr", "tidyr", "Hmisc", "networktools", "netcontrol")
+groundhog.library(pkgs, groundhog_day)
+
+  # TODO (Get GitHub commit version): Manually load "esmpack", which is not available on CRAN
+
+
+
+
+
 packages <- rownames(installed.packages())
 if (!"esmpack" %in% packages) {
-  remotes::install_github("secastroal/esmpack")}
+  remotes::install_github("secastroal/esmpack")
+}
 rm(packages)
+
 library("esmpack")
 
 # ---------------------------------------------------------------------------- #
-# TODO (JE to review Josip's code below): Import data ----
+# Import data ----
 # ---------------------------------------------------------------------------- #
 
 load("./02_networks/data/final_clean/data_var.RDS")
 
 # ---------------------------------------------------------------------------- #
-# TODO (JE to review Josip's code below): Run VAR analyses ----
+# Create vector to store unique participant IDs ----
 # ---------------------------------------------------------------------------- #
 
-#we have already previously detrended the data, and now we run the analyses with our own tinterval-transformed time variable,
-#with tinterval set to 1.
+ids <- unique(data_var$lifepak_id)
 
-#---------------------------------------------------------------------
-#Run DSEM per each person in Mplus (person-specific VAR)----
-#---------------------------------------------------------------------
-
-#---------------------------------------------------------------------#
-#Computing the 8-node person-specific network######
-#---------------------------------------------------------------------#
-
-#run the analysis
+# ---------------------------------------------------------------------------- #
+# Run idiographic VAR models using all 8 nodes ----
+# ---------------------------------------------------------------------------- #
 
 varfit <- list()
 
-if (!(dir.exists("./02_networks/results/Mplus_var"))) {dir.create("./02_networks/results/Mplus_var")}
+mplus_var_path <- "./02_networks/results/mplus_var/"
 
-setwd("./02_networks/results/Mplus_var/")
+if (!(dir.exists(mplus_var_path))) {dir.create(mplus_var_path)}
+
+setwd(mplus_var_path)
 
 for (i in 1:length(ids)) {
   tmp <- data_var[data_var$lifepak_id == ids[i], 
                   c("bin_no_adj", "bad_d", "control_d", "energy_d", "focus_d", "fun_d", "interest_d", "movement_d", "sad_d")]
+  
+  # TODO: JE to return to this "na.omit()", which removes rows with any NAs
+  
+  
+  
+  
+  
   tmp <- na.omit(tmp)
   names(tmp) <- c("time", "bad", "cont", "ener", "foc", "fun", "int", "move", "sad")
   
@@ -81,25 +102,36 @@ for (i in 1:length(ids)) {
                            filename = paste0("id", ids[i], ".dat"),
                            variable_options = list(timevar = "time", tinterval = 1),
                            output_options = list(standardized = TRUE),
-                           analysis_options = list(biterations.min = 5000,
-                                                   chains = 3),
+                           analysis_options = list(biterations.min = 5000, chains = 3),
                            runmodel = !file.exists(paste0("id", ids[i], ".out")))
 }
 rm(tmp)
 
 setwd(wd_dir)
 
-saveRDS(varfit, file="./02_networks/results/varfit.RDS")
+saveRDS(varfit, file = "./02_networks/results/varfit.RDS")
 
-#--------------------------------------------
-#Computing the 7-node network with control
-#-------------------------------------------- 
+# TODO: JE to obtain output in "./02_networks/results/Mplus_var" from Josip
+
+
+
+
+
+# ---------------------------------------------------------------------------- #
+# Run idiographic VAR models using 7 nodes (including "control"; excluding "fun") ----
+# ---------------------------------------------------------------------------- #
 
 varfit_control <- list()
 
-if (!(dir.exists("./02_networks/results/Mplus_control"))) {dir.create("./02_networks/results/Mplus_control")}
+mplus_var_control_path <- "./02_networks/results/mplus_var_control/"
 
-setwd("./02_networks/results/Mplus_control/")
+if (!(dir.exists(mplus_var_control_path))) {dir.create(mplus_var_control_path)}
+
+setwd(mplus_var_control_path)
+
+if (!(dir.exists(mplus_var_path))) {dir.create(mplus_var_path)}
+
+setwd(mplus_var_path)
 
 for (i in 1:length(ids)) {
   tmp <- data_var[data_var$lifepak_id == ids[i], 
@@ -111,29 +143,32 @@ for (i in 1:length(ids)) {
                                    filename = paste0("id", ids[i], ".dat"),
                                    variable_options = list(timevar = "time", tinterval = 1),
                                    output_options = list(standardized = TRUE),
-                                   analysis_options = list(biterations.min = 5000,
-                                                           chains = 3),
+                                   analysis_options = list(biterations.min = 5000, chains = 3),
                                    runmodel = !file.exists(paste0("id", ids[i], ".out")))
 }
 rm(tmp)
 
 setwd(wd_dir)
 
+saveRDS(varfit_control, file = "./02_networks/results/varfit_control.RDS")
 
-#save as RDS file
-saveRDS(varfit_control, file="./02_networks/results/varfit_control.RDS")
+# TODO: JE to obtain output in "./02_networks/results/Mplus_control/" from Josip
 
 
 
-#---------------------------------------------------
-# Computing the 7-node network with fun######
-#---------------------------------------------------
+
+
+# ---------------------------------------------------------------------------- #
+# Run idiographic VAR models using 7 nodes (including "fun"; excluding "control") ----
+# ---------------------------------------------------------------------------- #
 
 varfit_fun <- list()
 
-if (!(dir.exists("./02_networks/results/Mplus_fun"))) {dir.create("./02_networks/results/Mplus_fun")}
+mplus_var_fun_path <- "./02_networks/results/mplus_var_fun/"
 
-setwd("./02_networks/results/Mplus_fun/")
+if (!(dir.exists(mplus_var_fun_path))) {dir.create(mplus_var_fun_path)}
+
+setwd(mplus_var_fun_path)
 
 for (i in 1:length(ids)) {
   tmp <- data_var[data_var$lifepak_id == ids[i], 
@@ -145,121 +180,137 @@ for (i in 1:length(ids)) {
                                filename = paste0("id", ids[i], ".dat"),
                                variable_options = list(timevar = "time", tinterval = 1),
                                output_options = list(standardized = TRUE),
-                               analysis_options = list(biterations.min = 5000,
-                                                       chains = 3),
+                               analysis_options = list(biterations.min = 5000, chains = 3),
                                runmodel = !file.exists(paste0("id", ids[i], ".out")))
 }
 rm(tmp)
 
 setwd(wd_dir)
 
-#save as RDS file
-saveRDS(varfit_fun, file="./02_networks/results/varfit_fun.RDS")
+saveRDS(varfit_fun, file = "./02_networks/results/varfit_fun.RDS")
+
+# TODO: JE to obtain output in "./02_networks/results/Mplus_fun/" from Josip
 
 
 
 
 
 # ---------------------------------------------------------------------------- #
-# TODO (JE to review Josip's code below): Run ML-VAR analyses ----
+# Run ML-VAR model using all 8 nodes ----
 # ---------------------------------------------------------------------------- #
-
-#-----------------------------------------------------------------------------#
-# Computing the 8-node ML-VAR network#####
-#-----------------------------------------------------------------------------#
-
 
 varfit <- list()
 
-if (!(dir.exists("./02_networks/results/Mplus_mlvar"))) {dir.create("./02_networks/results/Mplus_mlvar")}
+mplus_mlvar_path <- "./02_networks/results/mplus_mlvar/"
 
-setwd("./02_networks/results/Mplus_mlvar/")
+if (!(dir.exists(mplus_mlvar_path))) {dir.create(mplus_mlvar_path)}
 
-tmp <- data_var [, c("lifepak_id","bin_no_adj", "bad_d", "control_d", "energy_d", "focus_d", "fun_d", "interest_d", "movement_d", "sad_d")]
+setwd(mplus_mlvar_path)
+
+tmp <- data_var[, c("lifepak_id", "bin_no_adj", "bad_d", "control_d", "energy_d", "focus_d", "fun_d", "interest_d", "movement_d", "sad_d")]
 tmp <- na.omit(tmp)
-names(tmp) <- c("id","time", "bad", "cont", "ener", "foc", "fun", "int", "move", "sad")
+names(tmp) <- c("id", "time", "bad", "cont", "ener", "foc", "fun", "int", "move", "sad")
 
-#runmodel = TRUE
-mlvarfit <- mlvar2Mplus(y = c("bad", "cont", "ener", "foc", "fun", "int", "move", "sad"), id = "id", data= tmp,
+#runmodel = TRUE (TODO: What is this line for?)
+
+# TODO: What are lagged, slopes, trend, and rvar in random.effects? And how did
+# we deviate from the defaults (add a comment with the reason).
+
+
+
+
+
+mlvarfit <- mlvar2Mplus(y = c("bad", "cont", "ener", "foc", "fun", "int", "move", "sad"), id = "id", data = tmp,
                         random.effects = list(lagged = TRUE, slopes = FALSE,
                                               trend = TRUE, rvar = FALSE),
                         variable_options = list(timevar = "time", tinterval = 1),
                         output_options = list(standardized = TRUE),
-                        analysis_options = list(biterations.min = 5000,
-                                                chains = 3),
+                        analysis_options = list(biterations.min = 5000, chains = 3),
                         filename = "mlvar_tinterval.dat",
                         runmodel = !file.exists("mlvar_tinterval.out"))
 rm(tmp)
 
-
-#5000 iterations is enough
-
 setwd(wd_dir)
 
-#save as RDS file
-saveRDS(mlvarfit, file="./02_networks/results/mlvarfit.RDS")
+saveRDS(mlvarfit, file = "./02_networks/results/mlvarfit.RDS")
+
+# TODO: JE to obtain output in "./02_networks/results/Mplus_mlvar/" from Josip
 
 
-#------------------------------------------------------------------------------#                                                                          
-# Computing the 7-node ML-VAR network with control#####
-#------------------------------------------------------------------------------#
+
+
+
+# ---------------------------------------------------------------------------- #
+# Run ML-VAR model using 7 nodes (including "control"; excluding "fun") ----
+# ---------------------------------------------------------------------------- #
 
 varfit <- list()
 
-if (!(dir.exists("./02_networks/results/Mplus_mlvar_control"))) {dir.create("./02_networks/results/Mplus_mlvar_control")}
+mplus_mlvar_control_path <- "./02_networks/results/mplus_mlvar_control/"
 
-setwd("./02_networks/results/Mplus_mlvar_control/")
+if (!(dir.exists(mplus_mlvar_control_path))) {dir.create(mplus_mlvar_control_path)}
 
-tmp <- data_var [, c("lifepak_id","bin_no_adj", "bad_d", "control_d", "energy_d", "focus_d", "interest_d", "movement_d", "sad_d")]
+setwd(mplus_mlvar_control_path)
+
+tmp <- data_var[, c("lifepak_id", "bin_no_adj", "bad_d", "control_d", "energy_d", "focus_d", "interest_d", "movement_d", "sad_d")]
 tmp <- na.omit(tmp)
-names(tmp) <- c("id","time", "bad", "cont", "ener", "foc", "int", "move", "sad")
+names(tmp) <- c("id", "time", "bad", "cont", "ener", "foc", "int", "move", "sad")
 
-#runmodel = TRUE
-mlvarfit_control <- mlvar2Mplus(y = c("bad", "cont", "ener", "foc", "int", "move", "sad"), id = "id", data= tmp,
+#runmodel = TRUE (TODO: What is this line for?)
+
+mlvarfit_control <- mlvar2Mplus(y = c("bad", "cont", "ener", "foc", "int", "move", "sad"), id = "id", data = tmp,
                                 random.effects = list(lagged = TRUE, slopes = FALSE,
                                                       trend = TRUE, rvar = FALSE),
                                 variable_options = list(timevar = "time", tinterval = 1),
                                 output_options = list(standardized = TRUE),
-                                analysis_options = list(biterations.min = 5000,
-                                                        chains = 3),
+                                analysis_options = list(biterations.min = 5000, chains = 3),
                                 filename = "mlvar_tinterval.dat",
                                 runmodel = !file.exists("mlvar_tinterval.out"))
 rm(tmp)
 
 setwd(wd_dir)
 
-saveRDS(mlvarfit_control, file="./02_networks/results/mlvarfit_control.RDS")
+saveRDS(mlvarfit_control, file = "./02_networks/results/mlvarfit_control.RDS")
 
-#------------------------------------------------------------------------------#                                                                          
-# Computing the 7-node ML-VAR network with fun#####
-#------------------------------------------------------------------------------#
+# TODO: JE to obtain output in "./02_networks/results/Mplus_mlvar_control/" from Josip
 
+
+
+
+# ---------------------------------------------------------------------------- #
+# Run ML-VAR model using 7 nodes (including "fun"; excluding "control") ----
+# ---------------------------------------------------------------------------- #
 
 varfit <- list()
 
-if (!(dir.exists("./02_networks/results/Mplus_mlvar_fun"))) {dir.create("./02_networks/results/Mplus_mlvar_fun")}
+mplus_mlvar_fun_path <- "./02_networks/results/mplus_mlvar_fun/"
 
-setwd("./02_networks/results/Mplus_mlvar_fun/")
+if (!(dir.exists(mplus_mlvar_fun_path))) {dir.create(mplus_mlvar_fun_path)}
 
-tmp <- data_var [, c("lifepak_id","bin_no_adj", "bad_d", "energy_d", "focus_d", "fun_d", "interest_d", "movement_d", "sad_d")]
+setwd(mplus_mlvar_fun_path)
+
+tmp <- data_var[, c("lifepak_id", "bin_no_adj", "bad_d", "energy_d", "focus_d", "fun_d", "interest_d", "movement_d", "sad_d")]
 tmp <- na.omit(tmp)
-names(tmp) <- c("id","time", "bad", "ener", "foc", "fun", "int", "move", "sad")
+names(tmp) <- c("id", "time", "bad", "ener", "foc", "fun", "int", "move", "sad")
 
-#runmodel = TRUE
-mlvarfit_fun <- mlvar2Mplus(y = c("bad", "ener", "foc", "fun", "int", "move", "sad"), id = "id", data= tmp,
+#runmodel = TRUE (TODO: What is this line for?)
+
+mlvarfit_fun <- mlvar2Mplus(y = c("bad", "ener", "foc", "fun", "int", "move", "sad"), id = "id", data = tmp,
                             random.effects = list(lagged = TRUE, slopes = FALSE,
                                                   trend = TRUE, rvar = FALSE),
                             variable_options = list(timevar = "time", tinterval = 1),
                             output_options = list(standardized = TRUE),
-                            analysis_options = list(biterations.min = 5000,
-                                                    chains = 3),
+                            analysis_options = list(biterations.min = 5000, chains = 3),
                             filename = "mlvar_tinterval.dat",
                             runmodel = !file.exists("mlvar_tinterval.out"))
 rm(tmp)
 
 setwd(wd_dir)
 
-saveRDS(mlvarfit_fun, file="./02_networks/results/mlvarfit_fun.RDS")
+saveRDS(mlvarfit_fun, file = "./02_networks/results/mlvarfit_fun.RDS")
+
+# TODO: JE to obtain output in "./02_networks/results/Mplus_mlvar_fun/" from Josip
+
 
 
 

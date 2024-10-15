@@ -620,64 +620,75 @@ dat_bin <- dat_bin[, c("lifepak_id",
 # Remove unneeded columns ----
 # ---------------------------------------------------------------------------- #
 
+# Note: Node variable "fun" below has not yet been reverse-coded, and it will not 
+# be reverse-coded in "dat_anlys" (only in "dat_var")
+
 dat_anlys <- dat_bin[, c("lifepak_id",
                          "hr_since_start", "bin_no_adj", "bin_range_adj",
                          node_vars)]
 
-#-------------------------------------------------------------------------------
-# TODO (JE to review Josip's code below): Clean and detrend the data for VAR and ML-VAR
-#-------------------------------------------------------------------------------
+data_var <- dat_anlys[, c("lifepak_id",
+                          "bin_no_adj",
+                          node_vars)]
 
-#remove unused data frames that are not needed anymore at the end of anlaysis with rm()
+# ---------------------------------------------------------------------------- #
+# Reverse-code "fun" so that all nodes represent dysfunction ----
+# ---------------------------------------------------------------------------- #
 
-data_var <- dat_anlys [, c("lifepak_id", "bin_no_adj", "bad", "control", "energy", "focus", "fun", "interest", "movement", "sad")]
-
-#recoding the "fun" variable so that all variables are coded in the same direction. 
+# TODO: Ideally use a different variable name for reverse-coded fun ("fun_rev")
 
 data_var$fun <- 100 - data_var$fun
 
-#detrending the variables 
+# ---------------------------------------------------------------------------- #
+# Remove linear trend for each variable separately for each participant ----
+# ---------------------------------------------------------------------------- #
 
 variables <- c("bad", "control", "energy", "focus", "fun", "interest", "movement", "sad")
 
 # Loop through each variable
+
 for (var in variables) {
+  # Create new column for each variable's residuals and initialize with NA
   
-  # Get the column name for the residuals
   residual_col <- paste0(var, "_d")
   
-  # Initialize the residual column with NA values
   data_var[[residual_col]] <- NA
   
   # Loop through each participant
+  
   for (participant in unique(data_var$lifepak_id)) {
     
-    # Subset the data for the current participant
+    # Subset data for current participant
+    
     participant_data <- subset(data_var, lifepak_id == participant)
     
-    # Fit the linear model 
+    # Fit linear model 
     
     fit <- lm(participant_data[[var]] ~ participant_data$bin_no_adj, data = participant_data)
-    
+
     # Calculate residuals for non-NA values
+    
     residuals <- residuals(fit)
+    
     data_var[data_var$lifepak_id == participant & !is.na(data_var[[var]]), residual_col] <- residuals
   }
 }
 
-#removing participant 31 (ID = 550350) because it was found that the person-specific model for this participant would not converge - 
-#possible reason is that the participant's data contains a lot of 0's.
-data_var <- data_var %>% filter (lifepak_id != 550350)
+# ---------------------------------------------------------------------------- #
+# Exclude participant due to model nonconvergence ----
+# ---------------------------------------------------------------------------- #
 
-#create the "ids" column to store unique subjects id's
-ids <- unique(data_var$lifepak_id)
+# Exclude participant whose idiographic VAR model did not converge (possibly due
+# to many zeros in participant's node variables), leaving 53 participants
+
+data_var <- data_var %>% filter(lifepak_id != 550350)
+
+length(unique(data_var$lifepak_id)) == 53
 
 # ---------------------------------------------------------------------------- #
-# TODO (JE to review Josip's code below): Export data ----
+# Export data ----
 # ---------------------------------------------------------------------------- #
 
 dir.create("./02_networks/data/final_clean")
 
-save(dat_bin,   file = "./02_networks/data/final_clean/dat_bin.RDS")
-save(dat_anlys, file = "./02_networks/data/final_clean/dat_anlys.RDS")
 save(data_var, file = "./02_networks/data/final_clean/data_var.RDS")
