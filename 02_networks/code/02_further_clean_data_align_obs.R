@@ -624,11 +624,60 @@ dat_anlys <- dat_bin[, c("lifepak_id",
                          "hr_since_start", "bin_no_adj", "bin_range_adj",
                          node_vars)]
 
+#-------------------------------------------------------------------------------
+# TODO (JE to review Josip's code below): Clean and detrend the data for VAR and ML-VAR
+#-------------------------------------------------------------------------------
+
+#remove unused data frames that are not needed anymore at the end of anlaysis with rm()
+
+data_var <- dat_anlys [, c("lifepak_id", "bin_no_adj", "bad", "control", "energy", "focus", "fun", "interest", "movement", "sad")]
+
+#recoding the "fun" variable so that all variables are coded in the same direction. 
+
+data_var$fun <- 100 - data_var$fun
+
+#detrending the variables 
+
+variables <- c("bad", "control", "energy", "focus", "fun", "interest", "movement", "sad")
+
+# Loop through each variable
+for (var in variables) {
+  
+  # Get the column name for the residuals
+  residual_col <- paste0(var, "_d")
+  
+  # Initialize the residual column with NA values
+  data_var[[residual_col]] <- NA
+  
+  # Loop through each participant
+  for (participant in unique(data_var$lifepak_id)) {
+    
+    # Subset the data for the current participant
+    participant_data <- subset(data_var, lifepak_id == participant)
+    
+    # Fit the linear model 
+    
+    fit <- lm(participant_data[[var]] ~ participant_data$bin_no_adj, data = participant_data)
+    
+    # Calculate residuals for non-NA values
+    residuals <- residuals(fit)
+    data_var[data_var$lifepak_id == participant & !is.na(data_var[[var]]), residual_col] <- residuals
+  }
+}
+
+#removing participant 31 (ID = 550350) because it was found that the person-specific model for this participant would not converge - 
+#possible reason is that the participant's data contains a lot of 0's.
+data_var <- data_var %>% filter (lifepak_id != 550350)
+
+#create the "ids" column to store unique subjects id's
+ids <- unique(data_var$lifepak_id)
+
 # ---------------------------------------------------------------------------- #
-# Export data ----
+# TODO (JE to review Josip's code below): Export data ----
 # ---------------------------------------------------------------------------- #
 
 dir.create("./02_networks/data/final_clean")
 
-save(dat_bin,   file = "./02_networks/data/final_clean/dat_bin.RData")
-save(dat_anlys, file = "./02_networks/data/final_clean/dat_anlys.RData")
+save(dat_bin,   file = "./02_networks/data/final_clean/dat_bin.RDS")
+save(dat_anlys, file = "./02_networks/data/final_clean/dat_anlys.RDS")
+save(data_var, file = "./02_networks/data/final_clean/data_var.RDS")
