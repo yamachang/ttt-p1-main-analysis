@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------- #
 # Run VAR and ML-VAR Network Analyses ----
-# Authors: Josip Razum, Sebastian Castro-Alvarez, Laura F. Bringmann
+# Authors: Josip Razum, Sebastian Castro-Alvarez, Laura F. Bringmann, Jeremy W. Eberle
 # ---------------------------------------------------------------------------- #
 
 # ---------------------------------------------------------------------------- #
@@ -15,12 +15,12 @@
 # thus, here we set "tinterval" to 1. The data have also already been detrended. See
 # "02_further_clean_data_align_obs.R" for the alignment and detrending steps.
 
-# TODO: Note where "var2Mplus" and "mlvar2Mplus" functions are defined (i.e., in
-# "02_networks/code/from_sebastian/R/" folder) and when that code was obtained
-
-
-
-
+# Note: The "var2Mplus" and "mlvar2Mplus" functions (along with other functions)
+# are defined in the folder "./02_networks/code/from_sebastian_edited_by_josip/R/".
+# All functions in that folder were emailed from Sebastian to Jeremy on 9/5/23.
+# Josip removed the random effects covariances from the "write.mlvar" function in 
+# the script "write.mlvar_without_random_effects_covariance.R" (which Josip emailed 
+# to Jeremy on 10/17/24) but did not change Sebastian's other scripts in that folder.
 
 # ---------------------------------------------------------------------------- #
 # Store working directory, check correct R version, load packages ----
@@ -38,24 +38,18 @@ source("./02_networks/code/01_define_functions.R")
 
 groundhog_day <- version_control()
 
-# TODO (Are all of these packages needed?): Load packages
+# Load packages (note: Josip is unsure whether this script uses the "esmpack" 
+# package below, but we load it just in case)
 
-
-
-
-
-pkgs <- c("remotes", "MplusAutomation", "dplyr", "tidyr", "Hmisc", "networktools", "netcontrol")
+pkgs <- c("remotes", "MplusAutomation")
 groundhog.library(pkgs, groundhog_day)
 
-  # TODO (Get GitHub commit version): Manually load "esmpack", which is not available on CRAN
-
-
-
-
+# Manually load "esmpack", which is not available on CRAN (install from latest GitHub 
+# commit "0e76781" ("Merge branch 'wviechtb:master' into master") as of 3/16/23
 
 packages <- rownames(installed.packages())
 if (!"esmpack" %in% packages) {
-  remotes::install_github("secastroal/esmpack")
+  remotes::install_github("secastroal/esmpack", ref = "0e76781")
 }
 rm(packages)
 
@@ -88,13 +82,6 @@ setwd(mplus_var_path)
 for (i in 1:length(ids)) {
   tmp <- data_var[data_var$lifepak_id == ids[i], 
                   c("bin_no_adj", "bad_d", "control_d", "energy_d", "focus_d", "fun_d", "interest_d", "movement_d", "sad_d")]
-  
-  # TODO: JE to return to this "na.omit()", which removes rows with any NAs
-  
-  
-  
-  
-  
   tmp <- na.omit(tmp)
   names(tmp) <- c("time", "bad", "cont", "ener", "foc", "fun", "int", "move", "sad")
   
@@ -110,12 +97,6 @@ rm(tmp)
 setwd(wd_dir)
 
 saveRDS(varfit, file = "./02_networks/results/varfit.RDS")
-
-# TODO: JE to obtain output in "./02_networks/results/Mplus_var" from Josip
-
-
-
-
 
 # ---------------------------------------------------------------------------- #
 # Run idiographic VAR models using 7 nodes (including "control"; excluding "fun") ----
@@ -152,12 +133,6 @@ setwd(wd_dir)
 
 saveRDS(varfit_control, file = "./02_networks/results/varfit_control.RDS")
 
-# TODO: JE to obtain output in "./02_networks/results/Mplus_control/" from Josip
-
-
-
-
-
 # ---------------------------------------------------------------------------- #
 # Run idiographic VAR models using 7 nodes (including "fun"; excluding "control") ----
 # ---------------------------------------------------------------------------- #
@@ -189,12 +164,6 @@ setwd(wd_dir)
 
 saveRDS(varfit_fun, file = "./02_networks/results/varfit_fun.RDS")
 
-# TODO: JE to obtain output in "./02_networks/results/Mplus_fun/" from Josip
-
-
-
-
-
 # ---------------------------------------------------------------------------- #
 # Run ML-VAR model using all 8 nodes ----
 # ---------------------------------------------------------------------------- #
@@ -211,14 +180,7 @@ tmp <- data_var[, c("lifepak_id", "bin_no_adj", "bad_d", "control_d", "energy_d"
 tmp <- na.omit(tmp)
 names(tmp) <- c("id", "time", "bad", "cont", "ener", "foc", "fun", "int", "move", "sad")
 
-#runmodel = TRUE (TODO: What is this line for?)
-
-# TODO: What are lagged, slopes, trend, and rvar in random.effects? And how did
-# we deviate from the defaults (add a comment with the reason).
-
-
-
-
+# Note: random.effects arguments are Sebastian's defaults
 
 mlvarfit <- mlvar2Mplus(y = c("bad", "cont", "ener", "foc", "fun", "int", "move", "sad"), id = "id", data = tmp,
                         random.effects = list(lagged = TRUE, slopes = FALSE,
@@ -233,12 +195,6 @@ rm(tmp)
 setwd(wd_dir)
 
 saveRDS(mlvarfit, file = "./02_networks/results/mlvarfit.RDS")
-
-# TODO: JE to obtain output in "./02_networks/results/Mplus_mlvar/" from Josip
-
-
-
-
 
 # ---------------------------------------------------------------------------- #
 # Run ML-VAR model using 7 nodes (including "control"; excluding "fun") ----
@@ -256,8 +212,6 @@ tmp <- data_var[, c("lifepak_id", "bin_no_adj", "bad_d", "control_d", "energy_d"
 tmp <- na.omit(tmp)
 names(tmp) <- c("id", "time", "bad", "cont", "ener", "foc", "int", "move", "sad")
 
-#runmodel = TRUE (TODO: What is this line for?)
-
 mlvarfit_control <- mlvar2Mplus(y = c("bad", "cont", "ener", "foc", "int", "move", "sad"), id = "id", data = tmp,
                                 random.effects = list(lagged = TRUE, slopes = FALSE,
                                                       trend = TRUE, rvar = FALSE),
@@ -271,11 +225,6 @@ rm(tmp)
 setwd(wd_dir)
 
 saveRDS(mlvarfit_control, file = "./02_networks/results/mlvarfit_control.RDS")
-
-# TODO: JE to obtain output in "./02_networks/results/Mplus_mlvar_control/" from Josip
-
-
-
 
 # ---------------------------------------------------------------------------- #
 # Run ML-VAR model using 7 nodes (including "fun"; excluding "control") ----
@@ -293,8 +242,6 @@ tmp <- data_var[, c("lifepak_id", "bin_no_adj", "bad_d", "energy_d", "focus_d", 
 tmp <- na.omit(tmp)
 names(tmp) <- c("id", "time", "bad", "ener", "foc", "fun", "int", "move", "sad")
 
-#runmodel = TRUE (TODO: What is this line for?)
-
 mlvarfit_fun <- mlvar2Mplus(y = c("bad", "ener", "foc", "fun", "int", "move", "sad"), id = "id", data = tmp,
                             random.effects = list(lagged = TRUE, slopes = FALSE,
                                                   trend = TRUE, rvar = FALSE),
@@ -308,11 +255,3 @@ rm(tmp)
 setwd(wd_dir)
 
 saveRDS(mlvarfit_fun, file = "./02_networks/results/mlvarfit_fun.RDS")
-
-# TODO: JE to obtain output in "./02_networks/results/Mplus_mlvar_fun/" from Josip
-
-
-
-
-
-
