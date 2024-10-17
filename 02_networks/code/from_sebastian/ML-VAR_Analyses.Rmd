@@ -67,6 +67,22 @@ mlvardata <- mlvardata[order(mlvardata$lifepak_id), ]
 
 The data has 14 variables: ID, response number, beep time, response time, time difference (probably how long did it take the person to complete the questionnaire), beep completed (variable indicating that the person 'completed' the questionnaire on that beep), and scores on 8 emotions.
 
+We start by excluding subject without any valid observation.
+
+```{r}
+id_exclude <- as.numeric(
+  names(
+    which(
+      calc.nomiss(response_time, lifepak_id, mlvardata) == 0
+      )
+    )
+  )
+
+mlvardata <- mlvardata[!(mlvardata$lifepak_id %in% id_exclude), ]
+
+rm(id_exclude)
+```
+
 Regarding the variables indicating the exact notification time and response time, we turn these variables into POSIXct, which is used to manage dates and times in R. 
 
 ```{r}
@@ -147,7 +163,7 @@ mtext(paste0("ID = ", unique(mlvardata_minus0$lifepak_id)[2]), 3, at = 100)
 
 ```
 
-As the data from these subjects is not reliable, we decide to exclude them from the analyses. Thus, we create another data.frame without their data.
+As the data from these subjects is not reliable, we decided to exclude them from the analyses. Thus, we create another data.frame without their data.
 
 ```{r}
 mlvardata02 <- mlvardata[!(mlvardata$lifepak_id %in% 
@@ -271,7 +287,7 @@ naniar::vis_miss(tmp[, -1], show_perc_col = FALSE)
 rm(tmp)
 ```
 
-Next, Figure @ref(fig:hist) presents the overall distribution of each variable of interest across the sample:
+Next, Figure \@ref(fig:hist) presents the overall distribution of each variable of interest across the sample:
 
 ```{r hist, fig.cap="Overall distribution of the variables 'interest' and 'sad'"}
 par(mfrow = c(1, 2))
@@ -451,8 +467,7 @@ rm(parameters)
 
 Next, we plot the estimated parameters with their 95\% credibility intervals per person.  
 
-
-```{r var1-par1, fig.cap = "Autoregressive effect of interest."}
+```{r var1-par1, fig.cap = "VAR with linear trend: Autoregressive effect of interest."}
 tmp <- results[results$parameters == "par1", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -464,7 +479,7 @@ rm(tmp)
 ```
 
 
-```{r var1-par2, fig.cap = "Crossregressive effect of interest on sad."}
+```{r var1-par2, fig.cap = "VAR with linear trend: Cross-regressive effect of interest on sad."}
 tmp <- results[results$parameters == "par2", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -475,7 +490,7 @@ abline(h = 0)
 rm(tmp)
 ```
 
-```{r var1-par3, fig.cap = "Crossregressive effect of sad on interest."}
+```{r var1-par3, fig.cap = "VAR with linear trend: Linear trend of interest."}
 tmp <- results[results$parameters == "par3", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -486,7 +501,7 @@ abline(h = 0)
 rm(tmp)
 ```
 
-```{r var1-par4, fig.cap = "Autoregressive effect of sad."}
+```{r var1-par4, fig.cap = "VAR with linear trend: Cross-regressive effect of sad on interest."}
 tmp <- results[results$parameters == "par4", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -497,7 +512,7 @@ abline(h = 0)
 rm(tmp)
 ```
 
-```{r var1-par5, fig.cap = "Linear trend of interest."}
+```{r var1-par5, fig.cap = "VAR with linear trend: Autoregressive effect of sad."}
 tmp <- results[results$parameters == "par5", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -508,7 +523,7 @@ abline(h = 0)
 rm(tmp)
 ```
 
-```{r var1-par6, fig.cap = "Linear trend of sad."}
+```{r var1-par6, fig.cap = "VAR with linear trend: Linear trend of sad."}
 tmp <- results[results$parameters == "par6", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -519,7 +534,7 @@ abline(h = 0)
 rm(tmp)
 ```
 
-We also ran the VAR analyses using a feature of DSEM that tries to approximate unequal spaced longitudinal observations to equal spaced by adding missing values. This is achieved by using the **TINTERVAL** option in Mplus. While this approach has been suggested to deliver similar results as continuous time models, finding the correct time interval can be difficult in empirical applications given the frequency of the beeps and whether the beeps prompted randomly throughout the day. Here, we used a **TINTERVAL** of 2.5 hours, which should result in adding three missing observations during the night. Note that some risks of using this feature is that multiple values might be on the same interval if the interval is not small enough. This is addressed automatically in Mplus, but if it happens too many times, Mplus warns that the approximation is not accurate.
+We also ran the VAR analyses using a feature of DSEM that tries to approximate unequal spaced longitudinal observations to equal spaced by adding missing values. This is achieved by using the **TINTERVAL** option in Mplus. While this approach has been suggested to deliver similar results as continuous time models, finding the correct time interval can be difficult in empirical applications given the frequency of the beeps and whether the beeps prompted randomly throughout the day. Here, we used a **TINTERVAL** of 2.5 hours, which should result in adding three missing observations during the night. Note that some risks of using this feature is that multiple values might be on the same interval if the interval is not small enough. This is addressed automatically in Mplus, but if it happens too many times, Mplus warns that the approximation is not accurate. For more information about this, see @Asparouhov2018.
 
 ```{r, results = 'hide'}
 varfit <- list()
@@ -541,7 +556,6 @@ for (i in 1:length(ids)) {
                            filename = paste0("id", ids[i], "tinterval.dat"),
                            runmodel = !file.exists(paste0("id", ids[i],
                                                           "tinterval.out"))
-                           #runmodel = TRUE
                            )
 }
 rm(i, tmp)
@@ -565,7 +579,7 @@ rm(parameters)
 
 The estimated parameters and their credibility intervals are shown in the following figures:
 
-```{r var2-par1, fig.cap = "Autoregressive effect of interest."}
+```{r var2-par1, fig.cap = "VAR with TINTERVAL: Autoregressive effect of interest."}
 tmp <- results[results$parameters == "par1", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -576,7 +590,7 @@ abline(h = 0)
 rm(tmp)
 ```
 
-```{r var2-par2, fig.cap = "Cross-regressive effect of intereston sad."}
+```{r var2-par2, fig.cap = "VAR with TINTERVAL: Cross-regressive effect of interest on sad."}
 tmp <- results[results$parameters == "par2", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -588,7 +602,7 @@ rm(tmp)
 ```
 
 
-```{r var2-par3, fig.cap = "Autoregressive effect of sad."}
+```{r var2-par4, fig.cap = "VAR with TINTERVAL: Cross-regressive effect of sad on interest."}
 tmp <- results[results$parameters == "par4", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -600,7 +614,7 @@ rm(tmp)
 ```
 
 
-```{r var2-par4, fig.cap = "Cross-regressive effect of sad on interest."}
+```{r var2-par5, fig.cap = "VAR with TINTERVAL: Autoregressive effect of sad."}
 tmp <- results[results$parameters == "par5", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
@@ -629,7 +643,7 @@ rm(tmp)
 
 <!-- The following ids have two observations within the same time interval: 56591, 206517, 478498, 510530, 715428, 793985, and 816917. -->
 
-```{r, results = 'hide', eval = FALSE}
+```{r, results = 'hide', eval = FALSE, echo = FALSE}
 varfit <- list()
 
 if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
@@ -659,7 +673,7 @@ setwd("..")
 ```
 
 
-```{r, eval = FALSE}
+```{r, eval = FALSE, echo = FALSE}
 results <- lapply(varfit, function(x) {
   out <- cbind(paste0("par", c(1:2, 4:5, 7:9)), 
                x$parameters$unstandardized[c(1:5, 8, 9), 
@@ -671,7 +685,7 @@ results <- do.call(rbind, results)
 ```
 
 
-```{r, eval = FALSE}
+```{r, eval = FALSE, echo = FALSE}
 tmp <- results[results$`paste0("par", c(1:2, 4:5, 7:9))` == "par1", ]
 tmp <- tmp[order(tmp$est), ]
 plot(tmp$est, ylim = c(-1, 1))
@@ -694,7 +708,7 @@ rm(tmp)
 <!-- Start running the analysis... how similar are the coefficients of VAR and ML-VAR? get centrality measures of the coefficients. -->
 
 
-```{r, eval = FALSE}
+```{r, eval = FALSE, echo = FALSE}
 tmp <- data_var[data_var$lifepak_id == ids[25], ]
 difftime(tail(tmp$notification_time, -1), head(tmp$notification_time, -1))
 difftime(tail(tmp$response_time, -1), head(tmp$response_time, -1))
@@ -705,6 +719,8 @@ difftime(tail(tmp$response_time, -1), head(tmp$response_time, -1))
 <!-- check the correlations between tinterval and trend results. Scatterplots with color codding for significant pairs three colors. -->
 
 ## Multilevel VAR analysis
+
+For the multilevel VAR analysis, we also fit the model adding time as a within covariate to account for linear trends and using the **TINTERVAL** option of Mplus. To fit the model using a linear trend, we used the following code:
 
 ```{r, results = 'hide'}
 if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
@@ -718,6 +734,7 @@ names(tmp) <- c("id", "time", "int", "sad")
 mlvarfit <- mlvar2Mplus(y = c("int", "sad"), id = "id", time = "time", data= tmp,
                         random.effects = list(lagged = TRUE, slopes = FALSE,
                                               trend = TRUE, rvar = FALSE),
+                        output_options = list(standardized = TRUE),
                         filename = "mlvar_trend.dat",
                         runmodel = !file.exists("mlvar_trend.out"))
 
@@ -725,13 +742,66 @@ rm(tmp)
 setwd("..")
 ```
 
+In this case, we requested the standardized parameters within persons. This allows to extract the standardized effects for each individual.
+
+```{r}
+results <- mlvarfit$parameters$wilevel.standardized$stdyx.standardized
+parameters <- c("S11|INT.ON", "S12|INT.ON", "S21|SAD.ON", "S22|SAD.ON")
+```
+
+Next, we plot the standardized lagged effects of each individual with their credibility intervals.
+
+```{r mlvar1-par1, fig.cap = "ML-VAR with linear trend: Autoregressive effect of interest."}
+tmp <- results[results$paramHeader == parameters[1], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+```{r mlvar1-par2, fig.cap = "ML-VAR with linear trend: Cross-regressive effect of interest on sad."}
+tmp <- results[results$paramHeader == parameters[2], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r mlvar1-par3, fig.cap = "ML-VAR with linear trend: Cross-regressive effect of sad on interest."}
+tmp <- results[results$paramHeader == parameters[3], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r mlvar1-par4, fig.cap = "ML-VAR with linear trend: Autoregressive effect of sad."}
+tmp <- results[results$paramHeader == parameters[4], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+We also fit the ML-VAR model using the **TINTERVAL** feature of Mplus. We indicated a time interval of 2.5 hours.
 
 ```{r, results = 'hide'}
 if (!(dir.exists("Mplus"))) {dir.create("Mplus")}
 
 setwd("Mplus/")
 
-tmp <- data_mlvar[, c("lifepak_id", "response_no_night", "interest", "sad")]
+tmp <- data_mlvar[, c("lifepak_id", "response_time", "interest", "sad")]
 tmp <- na.omit(tmp)
 names(tmp) <- c("id", "time", "int", "sad")
 
@@ -741,9 +811,64 @@ mlvarfit <- mlvar2Mplus(y = c("int", "sad"), id = "id", data= tmp,
                         variable_options = list(timevar = "time", tinterval = 2.5),
                         analysis_options = list(biterations.min = 10000,
                                                 chains = 3),
+                        output_options = list(standardized = TRUE),
                         filename = "mlvar_tinterval.dat",
                         runmodel = !file.exists("mlvar_tinterval.out"))
 
 rm(tmp)
 setwd("..")
 ```
+
+Here, we also extracted the within person standardized parameters.
+
+```{r}
+results <- mlvarfit$parameters$wilevel.standardized$stdyx.standardized
+parameters <- c("S11|INT.ON", "S12|INT.ON", "S21|SAD.ON", "S22|SAD.ON")
+```
+
+In the following Figures, we present the estimated standardized lagged effects with their corresponding credibility intervals.
+
+```{r mlvar2-par1, fig.cap = "ML-VAR with linear trend: Autoregressive effect of interest."}
+tmp <- results[results$paramHeader == parameters[1], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+```{r mlvar2-par2, fig.cap = "ML-VAR with linear trend: Cross-regressive effect of interest on sad."}
+tmp <- results[results$paramHeader == parameters[2], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r mlvar2-par3, fig.cap = "ML-VAR with linear trend: Cross-regressive effect of sad on interest."}
+tmp <- results[results$paramHeader == parameters[3], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+```{r mlvar2-par4, fig.cap = "ML-VAR with linear trend: Autoregressive effect of sad."}
+tmp <- results[results$paramHeader == parameters[4], ]
+tmp <- tmp[order(tmp$est), ]
+plot(tmp$est, ylim = c(min(tmp$lower_2.5ci), max(tmp$upper_2.5ci)))
+segments(x0 = 1:nrow(tmp), 
+         y0 = tmp$lower_2.5ci,
+         y1 = tmp$upper_2.5ci)
+abline(h = 0)
+rm(tmp)
+```
+
+# References
