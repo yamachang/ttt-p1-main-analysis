@@ -1,6 +1,9 @@
 # Write Mplus syntax of multilevel VAR models. Based on examples 9.30-9.33 and 
 # 9.37 in Mplus manual.
 
+# Note: Josip Razum changed Sebastian Castro-Alvarez's defaults for "between_syntax" 
+# as described in Lines 209-213 below
+
 # ML-VAR model syntax
 
 write.mlvar <- function(y, x = NULL, time = NULL, w = NULL, z = NULL, data, 
@@ -204,27 +207,37 @@ write.mlvar <- function(y, x = NULL, time = NULL, w = NULL, z = NULL, data,
   }
   
   # The full variance-covariance matrix among the random effects at the 
-  # between-level is estimated by default.
+  # between-level is estimated by default. However, Josip replaced the
+  # default code (commented out below) with code that does not estimate
+  # the covariances among random slopes (because the default code led to
+  # a model that was not identified at our sample size).
+  
+  # between_syntax <- c()
+  # 
+  # if (!is.null(w)) {
+  #   between_cov_effects <- paste0(rand_effects, " ON ",
+  #                                 paste(between_cov_effects, collapse = " "), ";")
+  #   
+  #   between_syntax <- c(between_syntax, between_cov_effects)
+  # }
+  # 
+  # if (!is.null(z)) {
+  #   between_dependent <- paste0(between_dependent, " ON ",
+  #                               paste(rand_effects, collapse = " "), ";")
+  #   between_syntax <- c(between_syntax, "\n", between_dependent)
+  # }
+  # 
+  # between_var_cov_syntax <- paste0(paste(c(y, rand_effects), collapse = " "), " WITH ",
+  #                                  paste(c(y, rand_effects), collapse = " "), ";")
+  # 
+  # between_syntax <- c(between_syntax, "\n", between_var_cov_syntax)
   
   between_syntax <- c()
   
-  if (!is.null(w)) {
-    between_cov_effects <- paste0(rand_effects, " ON ",
-                                  paste(between_cov_effects, collapse = " "), ";")
-    
-    between_syntax <- c(between_syntax, between_cov_effects)
-  }
+  between_var_cov_syntax <- paste0(paste((y), collapse = " "), " WITH ",
+                                   paste((y), collapse = " "), ";")
   
-  if (!is.null(z)) {
-    between_dependent <- paste0(between_dependent, " ON ",
-                                paste(rand_effects, collapse = " "), ";")
-    between_syntax <- c(between_syntax, "\n", between_dependent)
-  }
-  
-  between_var_cov_syntax <- paste0(paste(c(y, rand_effects), collapse = " "), " WITH ",
-                                   paste(c(y, rand_effects), collapse = " "), ";")
-  
-  between_syntax <- c(between_syntax, "\n", between_var_cov_syntax)
+  between_syntax <- between_var_cov_syntax
   
   # Put within and between syntax together
   
