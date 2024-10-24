@@ -62,10 +62,14 @@ library("esmpack")
 load("./02_networks/data/final_clean/data_var.RDS")
 
 # ---------------------------------------------------------------------------- #
-# Create vector to store unique participant IDs ----
+# Create and export vector to store unique participant IDs ----
 # ---------------------------------------------------------------------------- #
 
 ids <- unique(data_var$lifepak_id)
+
+# Export for labeling results by participant later
+
+save(ids, file = "./02_networks/data/final_clean/ids.RDS")
 
 # ---------------------------------------------------------------------------- #
 # Run idiographic VAR models using all 8 nodes ----
